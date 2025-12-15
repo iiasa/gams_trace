@@ -26,8 +26,6 @@ Usage examples:
   python gams_trace.py --root main.gms --objective
   python gams_trace.py --root main.gms --equation eq_demand
   python gams_trace.py --root main.gms --dump-symbol A
-
-Author: M365 Copilot
 """
 
 import argparse
@@ -130,9 +128,11 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
         for i, line in enumerate(lines, start=1):
             m = INCLUDE_RE.match(line)
             if m:
-                inc_path = m.group(2).strip()
-                # Quotes or relative
-                inc_path = inc_path.strip('"\'')
+                inc_path_raw = m.group(2).strip()
+                # Remove surrounding quotes if present
+                inc_path = inc_path_raw.strip('"\'')
+                # NEW: Substitute %X% with '/' as path separator
+                inc_path = inc_path.replace('%X%', '/')
                 inc_full = os.path.join(dirn, inc_path)
                 _load(inc_full)
         ordered.append((full, lines))

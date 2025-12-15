@@ -1,16 +1,10 @@
-Great question, Albert! Since you’re solving a **linear program (LP) with CPLEX from GAMS**, the core of what you’re asking for is a **static provenance trace**: given your `.gms` codebase, show *where* the numbers in the objective, constraints, and bounds **come from** (tables, parameter assignments, includes, etc.).
-
-Below I’ve created a Python script that:
+The `gams_trace.py` script:
 
 *   Recursively loads your GAMS sources and resolves `$include` / `$batinclude`
 *   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables`, `Equations`, `Model`
 *   Detects your `solve ... using lp minimizing|maximizing ...`
 *   Builds a **dependency graph** of symbols referenced by assignments/equations
 *   Lets you query and **trace** the origin of numbers (e.g., parameters feeding the objective or a constraint’s RHS)
-
-You can download it here:
-
-[📄 gams\_trace.py](blob:https://outlook.office.com/ff50ec8f-5232-43d4-9cab-b6e7515e6457)
 
 ***
 
