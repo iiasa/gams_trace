@@ -81,7 +81,7 @@ IDENT_RE = re.compile(r"\b([A-Za-z_]\w*)\b")
 BUILTINS = {"sum","smin","smax","min","max","ord","card","power","exp","log","abs",
             "uniform","normal","floor","ceil","round","yes","no"}
 DECL_START_RE = re.compile(r"^\s*(sets?|parameters?|scalars?|tables?|variables?|equations?)\b", re.IGNORECASE)
-INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+([^;\n]+)", re.IGNORECASE)
+INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE)
 SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE)
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE)
@@ -128,14 +128,27 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
         for i, line in enumerate(lines, start=1):
             m = INCLUDE_RE.match(line)
             if m:
-                inc_path_raw = m.group(2).strip()
-                # Remove surrounding quotes if present
-                inc_path = inc_path_raw.strip('"\'')
-                # NEW: Substitute %X% with '/' as path separator
+                rest = m.group(2).strip()  # Everything after $include / $batinclude
+
+                # Extract the first "argument" — either quoted string or first token
+                # Handle both quoted and unquoted paths
+                path_match = re.match(r'''^\s*(?:"([^"]+)"|'([^']+)'|(\S+))''', rest)
+                if path_match:
+                    # Take the first non-None group: "..." or '...' or bare word
+                    inc_path = next(g for g in path_match.groups() if g is not None)
+                else:
+                    # Fallback: take up to first space (rare)
+                    inc_path = rest.split()[0]
+
+                # Clean quotes if still present (in case fallback used)
+                inc_path = inc_path.strip('"\'')
+                
+                # Substitute %X% with '/' as path separator
                 inc_path = inc_path.replace('%X%', '/')
+                
                 inc_full = os.path.join(dirn, inc_path)
                 _load(inc_full)
-        ordered.append((full, lines))
+            ordered.append((full, lines))
 
     _load(root_path)
     return ordered
