@@ -132,7 +132,17 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
             raise FileNotFoundError(f"Included file not found: {fp}")
         # Process includes first (pre-order to mimic compilation)
         dirn = os.path.dirname(full)
-        for i, line in enumerate(lines, start=1):
+        in_comment = False
+        for line in lines:
+            stripped = line.strip().lower()
+            if stripped == '$ontext':
+                in_comment = True
+                continue
+            elif stripped == '$offtext':
+                in_comment = False
+                continue
+            elif line.strip().startswith('*') or in_comment:
+                continue
             m = INCLUDE_RE.match(line)
             if m:
                 rest = m.group(2).strip()  # Everything after $include / $batinclude
@@ -187,9 +197,22 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
     for fidx, (fp, lines) in enumerate(files, start=1):
         status_msg = f"Parsing: {os.path.basename(fp)} ({fidx}/{num_files})                "
         print(f"\r{status_msg}", end="", flush=True)
+        in_comment = False
         i = 0
         while i < len(lines):
             line = lines[i].rstrip('\n')
+            stripped = line.strip().lower()
+            if stripped == '$ontext':
+                in_comment = True
+                i += 1
+                continue
+            elif stripped == '$offtext':
+                in_comment = False
+                i += 1
+                continue
+            elif line.strip().startswith('*') or in_comment:
+                i += 1
+                continue
             # Merge continuation lines if trailing comma and next line
             # (simple heuristic)
             if i + 1 < len(lines) and lines[i+1].lstrip().startswith(','):
