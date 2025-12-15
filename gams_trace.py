@@ -121,11 +121,14 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
         full = os.path.abspath(fp)
         if full in visited:
             return
-        if not os.path.exists(full):
-            raise FileNotFoundError(f"Included file not found: {fp}")
+        status_msg = f"Loading: {os.path.basename(full)}                 "
+        print(f"\r{status_msg}", end="", flush=True)
         visited.add(full)
-        with open(full, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
+        try:
+            with open(full, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Included file not found: {fp}")
         # Process includes first (pre-order to mimic compilation)
         dirn = os.path.dirname(full)
         for i, line in enumerate(lines, start=1):
@@ -157,6 +160,7 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
             ordered.append((full, lines))
 
     _load(root_path)
+    print(f"\rLoaded {len(ordered)} file(s).{'                                    '}", flush=True)
     return ordered
 
 # ----------------------------
@@ -275,7 +279,11 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 stype = stype_map.get(first_word, 'unknown')
                 # Extract names (split by commas until ';')
                 decl_body = line
-                names = [n.strip() for n in re.split(r",", decl_body.split(None, 1)[1])]
+                decl_parts = decl_body.split(None, 1)
+                if len(decl_parts) > 1:
+                    names = [n.strip() for n in re.split(r",", decl_parts[1])]
+                else:
+                    names = []
                 for raw in names:
                     # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
                     m = IDENT_RE.search(raw)
