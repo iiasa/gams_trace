@@ -35,6 +35,9 @@ import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
+# REGION substitution for include paths
+REGION = "REGION59"
+
 # ----------------------------
 # Data structures
 # ----------------------------
@@ -145,6 +148,9 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
                 
                 # Substitute %X% with '/' as path separator
                 inc_path = inc_path.replace('%X%', '/')
+                
+                # Substitute %REGION% with REGION value
+                inc_path = inc_path.replace('%REGION%', REGION)
                 
                 inc_full = os.path.join(dirn, inc_path)
                 _load(inc_full)
