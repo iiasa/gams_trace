@@ -54,6 +54,7 @@ class Definition:
     loc: SourceLoc
     deps: Set[str] = field(default_factory=set)  # symbols referenced
     values: Dict[Tuple[str, ...], float] = field(default_factory=dict)  # for tables
+    skipped: bool = False  # for large tables, parsing skipped for performance
 
 @dataclass
 class Symbol:
@@ -229,43 +230,50 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                             break
                         table_lines.append(l2)
                         j += 1
-                    # Parse a simple table: header row with column keys, then rows as key + numbers
-                    # This is heuristic and works for regular rectangular numeric tables.
-                    header_cols: List[str] = []
-                    values: Dict[Tuple[str, ...], float] = {}
-                    # Find first non-empty line as header
-                    for idx, tl in enumerate(table_lines):
-                        if tl.strip() and not tl.strip().endswith(':') and not tl.strip() == ';':
-                            header_line = tl
-                            header_cols = [c.strip() for c in re.split(r"\s+", header_line.strip()) if c.strip()]
-                            start_row = i + 1 + idx + 1
-                            break
+                    # Parse only small tables line by line; for large tables, skip to avoid performance issues
+                    if len(table_lines) > 100:
+                        values = {}
+                        skipped = True
                     else:
-                        header_cols = []
-                        start_row = i + 1
-                    # Parse rows
-                    r = start_row
-                    while r < i + 1 + len(table_lines):
-                        row_line = lines[r].rstrip('\n')
-                        if not row_line.strip() or row_line.strip() == ';':
-                            r += 1
-                            continue
-                        parts = [p for p in re.split(r"\s+", row_line.strip()) if p]
-                        if not parts:
-                            r += 1
-                            continue
-                        row_key = parts[0]
-                        for k, col in enumerate(header_cols[1:], start=1):
-                            if k >= len(parts):
+                        values = {}
+                        skipped = False
+                        # Parse a simple table: header row with column keys, then rows as key + numbers
+                        # This is heuristic and works for regular rectangular numeric tables.
+                        header_cols: List[str] = []
+                        values = {}
+                        # Find first non-empty line as header
+                        for idx, tl in enumerate(table_lines):
+                            if tl.strip() and not tl.strip().endswith(':') and not tl.strip() == ';':
+                                header_line = tl
+                                header_cols = [c.strip() for c in re.split(r"\s+", header_line.strip()) if c.strip()]
+                                start_row = i + 1 + idx + 1
+                                break
+                        else:
+                            header_cols = []
+                            start_row = i + 1
+                        # Parse rows
+                        r = start_row
+                        while r < i + 1 + len(table_lines):
+                            row_line = lines[r].rstrip('\n')
+                            if not row_line.strip() or row_line.strip() == ';':
+                                r += 1
                                 continue
-                            try:
-                                val = float(parts[k])
-                                key_tuple = (row_key, col)
-                                values[key_tuple] = val
-                            except ValueError:
-                                pass
-                        r += 1
-                    defn = Definition(kind='table', text='\n'.join([line] + table_lines), loc=SourceLoc(fp, i+1), deps=set(), values=values)
+                            parts = [p for p in re.split(r"\s+", row_line.strip()) if p]
+                            if not parts:
+                                r += 1
+                                continue
+                            row_key = parts[0]
+                            for k, col in enumerate(header_cols[1:], start=1):
+                                if k >= len(parts):
+                                    continue
+                                try:
+                                    val = float(parts[k])
+                                    key_tuple = (row_key, col)
+                                    values[key_tuple] = val
+                                except ValueError:
+                                    pass
+                            r += 1
+                    defn = Definition(kind='table', text=line, loc=SourceLoc(fp, i+1), deps=set(), values=values, skipped=skipped)
                     sym.defs.append(defn)
                     i = j
                     continue
@@ -294,6 +302,20 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         name = m.group(1)
                         sym = ensure_symbol(name, stype)
                         sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(fp, i+1)))
+                # For parameters and scalars, skip over data definitions bounded by / ... /
+                if stype in ['parameter', 'scalar']:
+                    j = i + 1
+                    in_data = False
+                    while j < len(lines):
+                        l2 = lines[j].rstrip('\n').strip()
+                        if l2.startswith('/'):
+                            in_data = True
+                        if in_data and l2.endswith('/'):
+                            i = j
+                            break
+                        if DECL_START_RE.match(lines[j]):
+                            break
+                        j += 1
                 i += 1
                 continue
 
@@ -359,7 +381,10 @@ def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited:
     if sym.defs:
         for d in sym.defs:
             if d.kind == 'table':
-                out.append("  "*depth + f"  ├─ table at {d.loc.file}:{d.loc.line} with {len(d.values)} numeric entries")
+                if d.skipped:
+                    out.append("  "*depth + f"  ├─ table at {d.loc.file}:{d.loc.line} (large table, parsing skipped for performance)")
+                else:
+                    out.append("  "*depth + f"  ├─ table at {d.loc.file}:{d.loc.line} with {len(d.values)} numeric entries")
             elif d.kind == 'assignment':
                 out.append("  "*depth + f"  ├─ assignment at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
             elif d.kind == 'equation':
