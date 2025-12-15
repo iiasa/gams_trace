@@ -182,7 +182,10 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 symbols[name].stype = stype
         return symbols[name]
 
-    for fp, lines in files:
+    num_files = len(files)
+    for fidx, (fp, lines) in enumerate(files, start=1):
+        status_msg = f"Parsing: {os.path.basename(fp)} ({fidx}/{num_files})                "
+        print(f"\r{status_msg}", end="", flush=True)
         i = 0
         while i < len(lines):
             line = lines[i].rstrip('\n')
@@ -425,6 +428,7 @@ def main():
         sys.exit(1)
 
     symbols, models, solves = parse_code(files)
+    print("\rParsing complete.{'                                         '}", flush=True)
 
     if args.show_solve:
         if not solves:
