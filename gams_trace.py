@@ -158,7 +158,7 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
                 
                 inc_full = os.path.join(dirn, inc_path)
                 _load(inc_full)
-            ordered.append((full, lines))
+        ordered.append((full, lines))
 
     _load(root_path)
     print(f"\rLoaded {len(ordered)} file(s).{'                                    '}", flush=True)
