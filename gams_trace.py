@@ -22,10 +22,11 @@ full grammar. It focuses on common patterns to provide transparent provenance.
 
 Usage examples:
 
-  python gams_trace.py --root main.gms --show-solve
-  python gams_trace.py --root main.gms --objective
-  python gams_trace.py --root main.gms --equation eq_demand
-  python gams_trace.py --root main.gms --dump-symbol A
+  python gams_trace.py --list-solves --scan-root /path/to/model/dir
+  python gams_trace.py --root main.gms --select-solve 1 --show-solves
+  python gams_trace.py --root main.gms --select-solve 1 --objective
+  python gams_trace.py --root main.gms --select-solve 1 --equation eq_demand
+  python gams_trace.py --root main.gms --select-solve 1 --dump-symbol A
 """
 
 import argparse
@@ -35,7 +36,6 @@ import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-# REGION substitution for include paths
 REGION = "REGION59"
 
 # ----------------------------
@@ -112,6 +112,24 @@ def find_idents(expr: str) -> Set[str]:
 # ----------------------------
 # Loader: read root and resolve includes
 # ----------------------------
+
+def scan_all_solves(root_dir: str) -> List[SolveInfo]:
+    solves = []
+    for subdir, dirs, files in os.walk(root_dir):
+        for file in files:
+            if file.endswith('.gms'):
+                fp = os.path.join(subdir, file)
+                try:
+                    with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                    for i, line_num in enumerate(lines, start=1):
+                        sm = SOLVE_RE.search(line_num)
+                        if sm:
+                            solves.append(SolveInfo(sm.group(1), sm.group(2).lower(), sm.group(3), SourceLoc(fp, i)))
+                except Exception:
+                    pass
+    return solves
+
 
 def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
     """Return list of (file_path, lines) in dependency order."""
@@ -423,12 +441,11 @@ def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited:
     return out
 
 
-def extract_objective(symbols: Dict[str, Symbol], solves: List[SolveInfo]) -> Tuple[Optional[SolveInfo], Optional[Definition]]:
+def extract_objective(symbols: Dict[str, Symbol], solve: Optional[SolveInfo]) -> Tuple[Optional[SolveInfo], Optional[Definition]]:
     """Find objective variable from the solve statement and the equation that defines it (if present)."""
-    if not solves:
+    if not solve:
         return None, None
-    # Use the last solve statement
-    s = solves[-1]
+    s = solve
     objvar = symbols.get(s.objvar)
     # Find an equation that directly references objvar on LHS (pattern: obj .. Z =e= ...)
     for sym in symbols.values():
@@ -462,12 +479,87 @@ def explain_equation(symbols: Dict[str, Symbol], eq_name: str) -> List[str]:
 
 def main():
     ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX).")
-    ap.add_argument('--root', required=True, help='Root .gms file to analyze')
-    ap.add_argument('--show-solve', action='store_true', help='Show detected solve statement(s)')
+    ap.add_argument('--root', help='Root .gms file to analyze')
+    ap.add_argument('--scan-root', default="../..", help='Directory to scan for solves (default: ../..)')
+    ap.add_argument('--list-solves', action='store_true', help='List all solves in the codebase')
+    ap.add_argument('--select-solve', type=int, help='ID of the solve to trace (from --list-solves)')
+    ap.add_argument('--show-solves', action='store_true', help='Show detected solve statement(s)')
     ap.add_argument('--objective', action='store_true', help='Trace objective variable/equation')
     ap.add_argument('--equation', help='Trace a specific equation by name')
     ap.add_argument('--dump-symbol', help='Trace a symbol (parameter/scalar/table/variable)')
     args = ap.parse_args()
+
+    if args.list_solves:
+        solves = scan_all_solves(args.scan_root)
+        with open('gams_trace.solves', 'w') as f:
+            f.write(f"scan_root: {args.scan_root}\n")
+            for idx, s in enumerate(solves, start=1):
+                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
+        return
+
+    if not args.root and (args.objective or args.equation or args.dump_symbol or args.select_solve):
+        print("Error: --root required for tracing")
+        sys.exit(1)
+
+    if args.select_solve:
+        try:
+            with open('gams_trace.solves', 'r') as f:
+                lines = f.readlines()
+            if not lines:
+                print("No solves persisted, run --list-solves first")
+                sys.exit(1)
+            root_line = lines.pop(0)
+            # Not used
+            selected_solve = None
+            for line in lines:
+                parts = line.strip().split('|')
+                if not parts or len(parts) < 6:
+                    continue
+                idx, model_kv, sense_kv, objvar_kv, file_kv, line_kv = parts
+                idx = int(idx)
+                if idx == args.select_solve:
+                    model = model_kv.split('=')[1]
+                    sense = sense_kv.split('=')[1]
+                    objvar = objvar_kv.split('=')[1]
+                    file = file_kv.split('=')[1]
+                    line_num = int(line_kv.split('=')[1])
+                    selected_solve = SolveInfo(model, sense, objvar, SourceLoc(file, line_num))
+                    break
+            if not selected_solve:
+                print(f"Invalid ID: {args.select_solve}")
+                sys.exit(1)
+        except FileNotFoundError:
+            print("gams_trace.solves not found, run --list-solves first")
+            sys.exit(1)
+
+    if not args.root:
+        if args.show_solves and not args.select_solve:
+            # Show persisted solves without loading
+            try:
+                with open('gams_trace.solves', 'r') as f:
+                    lines = f.readlines()
+                if lines:
+                    scan_root = lines[0].strip().split(':', 1)[1]
+                    for line in lines[1:]:
+                        parts = line.strip().split('|')
+                        if len(parts) >= 6:
+                            idx, model_kv, sense_kv, objvar_kv, file_kv, line_kv = parts
+                            model = model_kv.split('=', 1)[1]
+                            sense = sense_kv.split('=', 1)[1]
+                            objvar = objvar_kv.split('=', 1)[1]
+                            file = file_kv.split('=', 1)[1]
+                            line = line_kv.split('=', 1)[1]
+                            print(f"Solve {idx}: model={model}, sense={sense}, objvar={objvar} at {file}:{line}")
+                else:
+                    print("No solves persisted, run --list-solves first")
+            except FileNotFoundError:
+                print("gams_trace.solves not found, run --list-solves first")
+            return
+        else:
+            args.root = os.path.join(args.scan_root, "Trunk_latest/Model/4_model.gms")  # assume default
+
+    selected_solve = locals().get('selected_solve', None)
 
     try:
         files = load_gms(args.root)
@@ -478,16 +570,23 @@ def main():
     symbols, models, solves = parse_code(files)
     print("\rParsing complete.{'                                         '}", flush=True)
 
-    if args.show_solve:
-        if not solves:
-            print("No 'solve ... using lp ...' statement found.")
+    if args.show_solves:
+        if selected_solve:
+            s = selected_solve
+            print(f"Solve: model={s.model}, sense={s.sense}, objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+        elif not args.root:  # If no root, we already showed persisted
+            pass
         else:
-            for s in solves:
-                print(f"Solve: model={s.model}, sense={s.sense}, objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+            if not solves:
+                print("No 'solve ... using lp ...' statement found.")
+            else:
+                for s in solves:
+                    print(f"Solve: model={s.model}, sense={s.sense}, objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
         print()
 
     if args.objective:
-        s, obj_def = extract_objective(symbols, solves)
+        target_solve = selected_solve if selected_solve else solves[-1] if solves else None
+        s, obj_def = extract_objective(symbols, target_solve)
         if not s:
             print("No LP solve detected.")
         else:
@@ -516,7 +615,7 @@ def main():
             print(ln)
         print()
 
-    if not (args.show_solve or args.objective or args.equation or args.dump_symbol):
+    if not (args.show_solves or args.objective or args.equation or args.dump_symbol):
         print("Parsed symbols summary:")
         for name, sym in sorted(symbols.items()):
             print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")

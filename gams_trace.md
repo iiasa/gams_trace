@@ -8,7 +8,7 @@ The `gams_trace.py` script:
 
 ***
 
-## What the script does
+## What the script edoes
 
 **Capabilities** (static analysis):
 
@@ -30,19 +30,32 @@ The `gams_trace.py` script:
 
 ## Usage
 
-Once the script is on your machine:
+First, scan the codebase to list all available solves:
 
 ```bash
-python gams_trace.py --root path/to/main.gms --show-solve
-python gams_trace.py --root path/to/main.gms --objective
-python gams_trace.py --root path/to/main.gms --equation eq_supply
-python gams_trace.py --root path/to/main.gms --dump-symbol A
+python gams_trace.py --list-solves --scan-root /path/to/model/directory
 ```
+
+This will scan for all `solve ... using lp ...` statements and persist them in `gams_trace.solves` for selection.
+
+For tracing with a selected solve:
+
+```bash
+python gams_trace.py --root path/to/main.gms --select-solve 1 --show-solves
+python gams_trace.py --root main.gms --select-solve 1 --objective
+python gams_trace.py --root main.gms --select-solve 1 --equation eq_supply
+python gams_trace.py --root main.gms --select-solve 1 --dump-symbol A
+```
+
+If no `--select-solve` is specified, tracing uses the last (most recent) solve found in the parsed files.
 
 ### Typical outputs
 
-*   `--show-solve`:  
-    Shows where the LP solve is declared: model name, sense, objective variable, and file:line.
+*   `--list-solves`:  
+    Scans the provided directory recursively for `.gms` files and lists all LP solve statements with IDs for selection.
+
+*   `--show-solves`:  
+    Shows where the LP solve(s) is/are declared: model name, sense, objective variable, and file:line.
 
 *   `--objective`:  
     Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).  
