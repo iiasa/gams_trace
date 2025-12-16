@@ -33,7 +33,7 @@ The `gams_trace.py` script:
 First, parse the GAMS model (this will save parsed data to `gams_trace.parse` and list all available solves in `gams_trace.solves`):
 
 ```bash
-python gams_trace.py --root path/to/main.gms
+python gams_trace.py --parse path/to/main.gms
 ```
 
 Then, for tracing with a specified solve ID (automatically loads from `gams_trace.parse`):
@@ -47,8 +47,8 @@ python gams_trace.py --dump-symbol A --solve-number 1
 
 ### Typical outputs
 
-*   `--root path/to/main.gms`:  
-    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solves with IDs for selection (also persisted in `gams_trace.solves`).
+*   `--parse path/to/main.gms`:
+    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solve statements with IDs for selection (also persisted in `gams_trace.solves`).
 
 *   `--show-solves`:  
     Shows where the LP solve(s) is/are declared: model name, sense, objective variable, and file:line.
@@ -123,7 +123,7 @@ solve m using lp minimizing Z;
 2.  Run it with Python 3:
 
 ```bash
-python gams_trace.py --root /path/to/your/main.gms --objective
+python gams_trace.py --parse /path/to/your/main.gms --objective
 ```
 
 > If your codebase has nested includes, the script will follow `$include` and `$batinclude` relative to the root file’s directory.

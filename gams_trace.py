@@ -476,9 +476,9 @@ def explain_equation(symbols: Dict[str, Symbol], eq_name: str) -> List[str]:
 # ----------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Parses with --root, then loads from gams_trace.parse for queries.")
-    ap.add_argument('--root', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solves')
-    ap.add_argument('--solve-number', type=int, help='ID of the solve to trace (from previous --root listing)')
+    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Parses with --parse, then loads from gams_trace.parse for queries.")
+    ap.add_argument('--parse', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solve statements')
+    ap.add_argument('--solve-number', type=int, help='ID of the solve to trace (from previous --parse listing)')
     ap.add_argument('--show-solves', action='store_true', help='Show detected solve statement(s)')
     ap.add_argument('--objective', action='store_true', help='Trace objective variable/equation')
     ap.add_argument('--equation', help='Trace a specific equation by name')
@@ -493,28 +493,29 @@ def main():
     models = None
     solves = None
 
-    if args.root:
+    if args.parse:
         if any([args.solve_number, args.show_solves, args.objective, args.equation, args.dump_symbol]):
-            print("Error: --root is standalone for parsing. Other flags require loading from gams_trace.parse.")
+            print("Error: --parse is standalone for parsing. Other flags require loading from gams_trace.parse.")
             ap.print_help()
             sys.exit(1)
         # Parse from root
         try:
-            files = load_gms(args.root)
+            files = load_gms(args.parse)
         except Exception as e:
             print(f"Error loading files: {e}")
             sys.exit(1)
 
         symbols, models, solves = parse_code(files)
-        print("\rParsing complete.{'                                         '}", flush=True)
 
         # Serialize
         with open('gams_trace.parse', 'wb') as f:
             pickle.dump((symbols, models, solves), f)
+        print("\rParsing complete, saved parse tree to gams_trace.parse", flush=True)
 
         # Do list-solves
+        print("\nSolve statements:")
         with open('gams_trace.solves', 'w') as f:
-            f.write(f"root: {args.root}\n")
+            f.write(f"parse: {args.parse}\n")
             for idx, s in enumerate(solves, start=1):
                 print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                 f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
@@ -522,7 +523,7 @@ def main():
     else:
         if any([args.show_solves, args.objective, args.equation, args.dump_symbol, args.solve_number]):
             if not os.path.exists('gams_trace.parse'):
-                print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with --root first to parse and save data.")
+                print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with --parse first to parse and save data.")
                 sys.exit(1)
             with open('gams_trace.parse', 'rb') as f:
                 symbols, models, solves = pickle.load(f)
@@ -590,7 +591,7 @@ def main():
             print(ln)
         print()
 
-    if not (args.root or args.show_solves or args.objective or args.equation or args.dump_symbol or args.solve_number):
+    if not (args.parse or args.show_solves or args.objective or args.equation or args.dump_symbol or args.solve_number):
         print("Parsed symbols summary:")
         for name, sym in sorted(symbols.items()):
             print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")
