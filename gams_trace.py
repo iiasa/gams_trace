@@ -489,6 +489,11 @@ def main():
     ap.add_argument('--dump-symbol', help='Trace a symbol (parameter/scalar/table/variable)')
     args = ap.parse_args()
 
+    # Check if we need root for the requested operation
+    if not args.list_solves and not args.root and not (args.show_solves and not args.select_solve):
+        ap.print_help()
+        sys.exit(1)
+
     if args.list_solves:
         solves = scan_all_solves(args.scan_root)
         with open('gams_trace.solves', 'w') as f:
@@ -529,6 +534,7 @@ def main():
             if not selected_solve:
                 print(f"Invalid ID: {args.select_solve}")
                 sys.exit(1)
+            args.root = selected_solve.loc.file
         except FileNotFoundError:
             print("gams_trace.solves not found, run --list-solves first")
             sys.exit(1)
@@ -556,8 +562,6 @@ def main():
             except FileNotFoundError:
                 print("gams_trace.solves not found, run --list-solves first")
             return
-        else:
-            args.root = os.path.join(args.scan_root, "Trunk_latest/Model/4_model.gms")  # assume default
 
     selected_solve = locals().get('selected_solve', None)
 
