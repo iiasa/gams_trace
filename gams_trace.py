@@ -35,6 +35,7 @@ class Definition:
     text: str
     loc: SourceLoc
     deps: Set[str] = field(default_factory=set)  # symbols referenced
+    lhs: Optional[str] = None
     values: Dict[Tuple[str, ...], float] = field(default_factory=dict)  # for tables
     skipped: bool = False  # for large tables, parsing skipped for performance
 
@@ -71,7 +72,7 @@ INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE)
 SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE)
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE)
-EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|e|g)=\s*(.+?);\s*$", re.IGNORECASE)
+EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE)
 VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s+(.+);", re.IGNORECASE)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE)
 
@@ -348,7 +349,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 ename, lhs, sense, rhs = em.groups()
                 sym = ensure_symbol(ename, 'equation')
                 deps = find_idents(lhs) | find_idents(rhs)
-                sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(fp, i+1), deps=deps))
+                sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(fp, i+1), deps=deps, lhs=lhs.strip()))
                 i += 1
                 continue
 
@@ -359,7 +360,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 expr = am.group(3)
                 deps = find_idents(expr)
                 sym = ensure_symbol(tgt, symbols.get(tgt, Symbol(tgt, 'unknown')).stype or 'unknown')
-                sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(fp, i+1), deps=deps))
+                sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(fp, i+1), deps=deps, lhs=tgt.strip()))
                 i += 1
                 continue
 
@@ -408,17 +409,20 @@ def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited:
 
 
 def extract_objective(symbols: Dict[str, Symbol], solve: Optional[SolveInfo]) -> Tuple[Optional[SolveInfo], Optional[Definition]]:
-    """Find objective variable from the solve statement and the equation that defines it (if present)."""
+    """Find objective variable from the solve statement and the equation/assignment that defines it (if present)."""
     if not solve:
         return None, None
     s = solve
-    objvar = symbols.get(s.objvar)
-    # Find an equation that directly references objvar on LHS (pattern: obj .. Z =e= ...)
+    # First, look for assignments/equations where objvar is the target
+    for sym in symbols.values():
+        for d in sym.defs:
+            if d.lhs == s.objvar and d.kind in ['assignment', 'equation']:
+                return s, d
+    # Then, look for equations that reference objvar in dependencies (e.g., other equations using objvar)
     for sym in symbols.values():
         if sym.stype == 'equation':
             for d in sym.defs:
                 if d.kind == 'equation' and s.objvar in d.deps:
-                    # heuristic: if objvar appears, assume this is the objective-defining equation
                     return s, d
     return s, None
 
@@ -534,7 +538,8 @@ def main():
         else:
             print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
             if obj_def:
-                print(f"Objective equation at {obj_def.loc.file}:{obj_def.loc.line}")
+                kind_str = "equation" if obj_def.kind == 'equation' else 'assignment'
+                print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
                 print(obj_def.text.strip())
                 print("\nTracing dependencies of the objective expression:")
                 for dep in sorted(obj_def.deps):
