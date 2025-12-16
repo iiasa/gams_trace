@@ -1,36 +1,8 @@
 #!/usr/bin/env python3
-"""
-GAMS → CPLEX LP Data Trace Tool
---------------------------------
-
-This script performs static analysis on a GAMS codebase (.gms files) to help you
-trace *where raw data values come from* for key aspects of an LP model solved
-with CPLEX. It:
-
-1) Recursively loads GAMS source (resolves $include / $batinclude).
-2) Parses declarations (Sets, Parameters/Scalars, Tables, Variables, Equations, Model).
-3) Extracts assignments and equation definitions, and builds a dependency graph.
-4) Identifies the LP solve (solve ... using lp minimizing/maximizing ...).
-5) Provides query functions to trace:
-   - Objective data sources (parameters in the objective expression).
-   - Constraint RHS/LHS parameter sources.
-   - Variable bounds if assigned via parameters.
-
-NOTE: This is a heuristic/static parser. GAMS is flexible and rich; the tool does
-not evaluate conditional compilation ($if, $eval), embedded code, GDX I/O, nor the
-full grammar. It focuses on common patterns to provide transparent provenance.
-
-Usage examples:
-
-  python gams_trace.py --root main.gms --list-solves
-  python gams_trace.py --root main.gms --solve-number 1 --show-solves
-  python gams_trace.py --root main.gms --solve-number 1 --objective
-  python gams_trace.py --root main.gms --equation eq_demand --solve-number 1
-  python gams_trace.py --root main.gms --dump-symbol A --solve-number 1
-"""
 
 import argparse
 import os
+import pickle
 import re
 import sys
 from dataclasses import dataclass, field
@@ -472,10 +444,9 @@ def explain_equation(symbols: Dict[str, Symbol], eq_name: str) -> List[str]:
 # ----------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX).")
-    ap.add_argument('--root', help='Root .gms file to analyze')
-    ap.add_argument('--list-solves', action='store_true', help='List all solves in the model')
-    ap.add_argument('--solve-number', type=int, help='ID of the solve to trace (from --list-solves)')
+    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Parses with --root, then loads from gams_trace.parse for queries.")
+    ap.add_argument('--root', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solves')
+    ap.add_argument('--solve-number', type=int, help='ID of the solve to trace (from previous --root listing)')
     ap.add_argument('--show-solves', action='store_true', help='Show detected solve statement(s)')
     ap.add_argument('--objective', action='store_true', help='Trace objective variable/equation')
     ap.add_argument('--equation', help='Trace a specific equation by name')
@@ -486,20 +457,53 @@ def main():
         ap.print_help()
         sys.exit(1)
 
-    # Check if we need root for the requested operation
-    if (args.list_solves or args.show_solves or args.objective or args.equation or args.dump_symbol) and not args.root:
-        ap.print_help()
-        sys.exit(1)
+    symbols = None
+    models = None
+    solves = None
 
+    if args.root:
+        if any([args.solve_number, args.show_solves, args.objective, args.equation, args.dump_symbol]):
+            print("Error: --root is standalone for parsing. Other flags require loading from gams_trace.parse.")
+            ap.print_help()
+            sys.exit(1)
+        # Parse from root
+        try:
+            files = load_gms(args.root)
+        except Exception as e:
+            print(f"Error loading files: {e}")
+            sys.exit(1)
 
-    try:
-        files = load_gms(args.root)
-    except Exception as e:
-        print(f"Error loading files: {e}")
-        sys.exit(1)
+        symbols, models, solves = parse_code(files)
+        print("\rParsing complete.{'                                         '}", flush=True)
 
-    symbols, models, solves = parse_code(files)
-    print("\rParsing complete.{'                                         '}", flush=True)
+        # Serialize
+        with open('gams_trace.parse', 'wb') as f:
+            pickle.dump((symbols, models, solves), f)
+
+        # Do list-solves
+        with open('gams_trace.solves', 'w') as f:
+            f.write(f"root: {args.root}\n")
+            for idx, s in enumerate(solves, start=1):
+                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
+
+    else:
+        if any([args.show_solves, args.objective, args.equation, args.dump_symbol, args.solve_number]):
+            if not os.path.exists('gams_trace.parse'):
+                print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with --root first to parse and save data.")
+                sys.exit(1)
+            with open('gams_trace.parse', 'rb') as f:
+                symbols, models, solves = pickle.load(f)
+            print("Parsed data loaded from gams_trace.parse")
+        else:
+            # no flags, print summary only if parse exists, else help
+            if os.path.exists('gams_trace.parse'):
+                with open('gams_trace.parse', 'rb') as f:
+                    symbols, models, solves = pickle.load(f)
+                print("Parsed data loaded from gams_trace.parse")
+            else:
+                ap.print_help()
+                sys.exit(1)
 
     selected_solve = None
     if args.show_solves or args.objective or args.equation or args.dump_symbol:
@@ -516,13 +520,6 @@ def main():
                 print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
             sys.exit(1)
         selected_solve = solves[idx - 1]
-
-    if args.list_solves:
-        with open('gams_trace.solves', 'w') as f:
-            f.write(f"root: {args.root}\n")
-            for idx, s in enumerate(solves, start=1):
-                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-                f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
 
     if args.show_solves:
         s = selected_solve
@@ -560,7 +557,7 @@ def main():
             print(ln)
         print()
 
-    if not (args.show_solves or args.objective or args.equation or args.dump_symbol or args.list_solves):
+    if not (args.root or args.show_solves or args.objective or args.equation or args.dump_symbol or args.solve_number):
         print("Parsed symbols summary:")
         for name, sym in sorted(symbols.items()):
             print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")
