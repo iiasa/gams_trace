@@ -246,7 +246,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         values = {}
                         skipped = False
                         # Parse a simple table: header row with column keys, then rows as key + numbers
-                        # This is heuristic and works for regular rectangular numeric tables.
+                        # This is heuristic and works for common rectangular numeric tables.
                         header_cols: List[str] = []
                         values = {}
                         # Find first non-empty line as header
@@ -343,7 +343,35 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 i += 1
                 continue
 
-            # Equation definitions
+            # Check for multi-line equation start (has .. but no ; at end)
+            eq_start_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.*)$", re.IGNORECASE)
+            em_start = eq_start_re.match(line)
+            if em_start and not line.strip().endswith(';'):
+                # Accumulate multi-line equation
+                ename = em_start.group(1)
+                accumulated = line
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].rstrip('\n')
+                    accumulated += ' ' + next_line.strip()
+                    if next_line.strip().endswith(';'):
+                        # Found the end, parse the full equation
+                        em = EQUATION_RE.match(accumulated)
+                        if em:
+                            lhs, sense, rhs = em.groups()[1:4]  # Skip ename
+                            sym = ensure_symbol(ename, 'equation')
+                            deps = find_idents(lhs) | find_idents(rhs)
+                            sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(fp, i+1), deps=deps, lhs=lhs.strip()))
+                        i = j
+                        break
+                    j += 1
+                else:
+                    # No semicolon found, treat as single line attempt
+                    pass
+                i += 1
+                continue
+
+            # Equation definitions (single line)
             em = EQUATION_RE.match(line)
             if em:
                 ename, lhs, sense, rhs = em.groups()
