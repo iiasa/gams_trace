@@ -41,7 +41,7 @@ class IncludeError(Exception):
         self.include_file = include_file
         self.include_loc = include_loc
         if include_loc:
-            include_type = '$bat' + include_loc[2] if include_loc[2] == 'batinclude' else '$' + include_loc[2]
+            include_type = '$' + include_loc[2]
             super().__init__(f"{message}\n  {include_type} statement at {include_loc[0]}:{include_loc[1]}")
         else:
             super().__init__(message)
@@ -128,8 +128,9 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
     """Return list of (file_path, lines) in dependency order."""
     visited: Set[str] = set()
     ordered: List[Tuple[str, List[str]]] = []
+    base_dir = os.path.dirname(os.path.abspath(root_path))
 
-    def _load(fp: str, include_loc: Optional[Tuple[str, int, str]] = None):
+    def _load(fp: str, include_loc: Optional[Tuple[str, int, str]] = None, base_dir: str = base_dir):
         full = os.path.abspath(fp)
         if full in visited:
             return
@@ -142,7 +143,6 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
         except FileNotFoundError:
             raise IncludeError(f"Included file not found: {fp}", include_file=fp, include_loc=include_loc)
         # Process includes first (pre-order to mimic compilation)
-        dirn = os.path.dirname(full)
         in_comment = False
         for i, line in enumerate(lines):
             stripped = line.strip().lower()
@@ -177,12 +177,12 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
                 # Substitute %REGION% with REGION value
                 inc_path = inc_path.replace('%REGION%', REGION)
                 
-                inc_full = os.path.join(dirn, inc_path)
+                inc_full = os.path.join(base_dir, inc_path)
                 include_type = 'batinclude' if m.group(1) else 'include'
-                _load(inc_full, include_loc=(fp, i+1, include_type))
+                _load(inc_full, include_loc=(fp, i+1, include_type), base_dir=base_dir)
         ordered.append((full, lines))
 
-    _load(root_path)
+    _load(root_path, base_dir=base_dir)
     print(f"\rLoaded {len(ordered)} file(s).{'                                    '}", flush=True)
     return ordered
 
