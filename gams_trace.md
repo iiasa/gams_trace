@@ -30,29 +30,27 @@ The `gams_trace.py` script:
 
 ## Usage
 
-First, scan the codebase to list all available solves:
+First, parse the GAMS model to list all available solves:
 
 ```bash
-python gams_trace.py --list-solves --scan-root /path/to/model/directory
+python gams_trace.py --root path/to/main.gms --list-solves
 ```
 
-This will scan for all `solve ... using lp ...` statements and persist them in `gams_trace.solves` for selection.
+This will parse the GAMS source and included files for all `solve ... using lp ...` statements and persist them in `gams_trace.solves` for selection.
 
-For tracing with a selected solve:
+For tracing with a specified solve ID:
 
 ```bash
-python gams_trace.py --root path/to/main.gms --select-solve 1 --show-solves
-python gams_trace.py --root main.gms --select-solve 1 --objective
-python gams_trace.py --root main.gms --select-solve 1 --equation eq_supply
-python gams_trace.py --root main.gms --select-solve 1 --dump-symbol A
+python gams_trace.py --root path/to/main.gms --solve-number 1 --show-solves
+python gams_trace.py --root main.gms --solve-number 1 --objective
+python gams_trace.py --root main.gms --equation eq_supply --solve-number 1
+python gams_trace.py --root main.gms --dump-symbol A --solve-number 1
 ```
-
-If no `--select-solve` is specified, tracing uses the last (most recent) solve found in the parsed files.
 
 ### Typical outputs
 
 *   `--list-solves`:  
-    Scans the provided directory recursively for `.gms` files and lists all LP solve statements with IDs for selection.
+    Parses the provided root and included `.gms` files for LP solve statements with IDs for selection.
 
 *   `--show-solves`:  
     Shows where the LP solve(s) is/are declared: model name, sense, objective variable, and file:line.
