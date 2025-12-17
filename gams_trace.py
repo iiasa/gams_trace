@@ -47,6 +47,7 @@ class Symbol:
     dims: List[str] = field(default_factory=list)
     decls: List[Definition] = field(default_factory=list)
     defs: List[Definition] = field(default_factory=list)
+    csv_file: Optional[str] = None  # for sets/tables loaded from CSV via $ondelim
 
 @dataclass
 class ModelInfo:
@@ -156,7 +157,8 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
                 
                 inc_full = os.path.join(base_dir, inc_path)
                 include_type = 'batinclude' if m.group(1) else 'include'
-                _load(inc_full, include_loc=(fp, i+1, include_type), base_dir=base_dir)
+                if not inc_path.lower().endswith('.csv'):
+                    _load(inc_full, include_loc=(fp, i+1, include_type), base_dir=base_dir)
         ordered.append((full, lines))
 
     _load(root_path, base_dir=base_dir)
@@ -286,6 +288,16 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                             break
                         table_lines.append(l2)
                         j += 1
+                    # Check if data is from CSV
+                    if any('$ondelim' in tl.lower() for tl in table_lines) and any('$include' in tl.lower() and '.csv' in tl.lower() for tl in table_lines):
+                        for tl in table_lines:
+                            if '$include' in tl.lower():
+                                imm = INCLUDE_RE.match(tl.strip())
+                                if imm:
+                                    rest = imm.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                    if rest.lower().endswith('.csv'):
+                                        sym.csv_file = rest
+                                        break
                     # Parse only small tables line by line; for large tables, skip to avoid performance issues
                     if len(table_lines) > 100:
                         values = {}
@@ -351,6 +363,9 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                     names = [n.strip() for n in re.split(r",", decl_parts[1])]
                 else:
                     names = []
+                ondelim_found = False
+                csv_found = False
+                csv_path = None
                 for raw in names:
                     # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
                     m = IDENT_RE.search(raw)
@@ -358,6 +373,27 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         name = m.group(1)
                         sym = ensure_symbol(name, stype)
                         sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(fp, i+1)))
+                        # For sets, check if data is loaded from CSV
+                        if stype == 'set':
+                            # Look for $ondelim $include .csv after this decl
+                            k = i
+                            ondelim_found2 = False
+                            while k < len(lines):
+                                k += 1
+                                l3 = lines[k].strip().lower() if k < len(lines) else ''
+                                if l3 == '$offdelim':
+                                    break
+                                if l3 == '$ondelim':
+                                    ondelim_found2 = True
+                                if ondelim_found2 and l3.startswith('$include'):
+                                    inc_m2 = INCLUDE_RE.match(lines[k])
+                                    if inc_m2:
+                                        rest2 = inc_m2.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                        if rest2.lower().endswith('.csv'):
+                                            csv_path = rest2
+                                            csv_found = True
+                            if csv_found:
+                                sym.csv_file = csv_path
                 # For parameters and scalars, skip over data definitions bounded by / ... /
                 if stype in ['parameter', 'scalar']:
                     j = i + 1
@@ -512,6 +548,8 @@ def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited:
         out.append("  "*depth + f"✖ {name}: not declared/defined in parsed files")
         return out
     out.append("  "*depth + f"• {name} [{sym.stype}]")
+    if sym.csv_file:
+        out.append("  "*depth + f"  ├─ data loaded from CSV '{sym.csv_file}'")
     if sym.defs:
         for d in sym.defs:
             if d.kind == 'table':

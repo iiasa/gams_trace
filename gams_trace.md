@@ -24,6 +24,7 @@ The `gams_trace.py` script:
 
 *   Does not evaluate compile-time conditionals (`$if`, `$eval`) or macros.
 *   Does not process other GDX I/O (e.g., `execute_load`, `execute_unload`).
+*   Does not load or parse .csv files; tracks CSV file paths for set/table sources.
 *   Table parsing supports common rectangular numeric tables; unusual layouts may need adjustments.
 *   Coefficient extraction in expressions is heuristic—it traces *parameters used* rather than numerically building the full matrix.
 
