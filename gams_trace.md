@@ -8,23 +8,28 @@ The `gams_trace.py` script:
 
 ***
 
-## What the script edoes
- 
+## What the script does
+
 **Capabilities** (static analysis):
 
 *   **Includes:** Resolves `$include` and `$batinclude` to create a unified view of the codebase.
+*   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
 *   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values).
 *   **Assignments:** Records parameter/scalar assignments and their dependencies (e.g., `a(i) = b(i) + 0.1*c;` → `b` and `c`).
 *   **Equations:** Extracts equation definitions (`eq.. LHS =l= RHS;`) and their symbol dependencies.
 *   **Solve detection:** Finds the LP solve statement, sense (`minimizing` or `maximizing`), and objective variable.
-*   **Tracing:** Given a target symbol or equation, recursively traces dependencies down to raw sources (e.g., table entries or literals).
+*   **Tracing:** Given a target symbol or equation, recursively traces dependencies down to raw sources (e.g., table entries, literals, or GDX files).
 
 **Limitations** (by design, to keep it broadly usable):
 
 *   Does not evaluate compile-time conditionals (`$if`, `$eval`) or macros.
-*   Does not process GDX I/O (e.g., `execute_load`, `execute_unload`).
+*   Does not process other GDX I/O (e.g., `execute_load`, `execute_unload`).
 *   Table parsing supports common rectangular numeric tables; unusual layouts may need adjustments.
 *   Coefficient extraction in expressions is heuristic—it traces *parameters used* rather than numerically building the full matrix.
+
+**GDX Loading**:
+*   Traces symbol assignments from GDX files loaded via `$GDXIN`, `$LOAD`, and `$LOADDC`.
+*   Records GDX file path, source file location, and line number for tracing.
 
 ***
 
@@ -154,7 +159,7 @@ If you want deeper matrix-level details (e.g., extract exact coefficients per va
 ## Next steps (tailored to IBF workflows)
 
 *   If you share a *small anonymized snippet* of your `.gms` (especially your objective and 2–3 representative constraints), I can tweak the parser to your style (e.g., handling `alias`, special functions, or your typical table layouts).
-*   Do you also use **GDX** loads for data? If yes, I can add a light **GDX reference detector** (to flag where data leaves the code into external files), even if we don’t parse the GDX contents here.
+*   For symbols loaded from GDX files, tracing now shows the GDX file path and load location. No parsing of GDX contents itself.
 
 ***
 

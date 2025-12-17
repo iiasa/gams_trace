@@ -31,13 +31,14 @@ class SourceLoc:
 
 @dataclass
 class Definition:
-    kind: str  # 'assignment'|'table'|'declaration'|'equation'
+    kind: str  # 'assignment'|'table'|'declaration'|'equation'|'gdx_load'
     text: str
     loc: SourceLoc
     deps: Set[str] = field(default_factory=set)  # symbols referenced
     lhs: Optional[str] = None
     values: Dict[Tuple[str, ...], float] = field(default_factory=dict)  # for tables
     skipped: bool = False  # for large tables, parsing skipped for performance
+    gdx_file: Optional[str] = None  # for GDX-loaded symbols
 
 @dataclass
 class Symbol:
@@ -69,6 +70,9 @@ BUILTINS = {"sum","smin","smax","min","max","ord","card","power","exp","log","ab
             "uniform","normal","floor","ceil","round","yes","no"}
 DECL_START_RE = re.compile(r"^\s*(sets?|parameters?|scalars?|tables?|variables?|equations?)\b", re.IGNORECASE)
 INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE)
+GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE)
+LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE)
+LOADDC_RE = re.compile(r"^\s*\$loaddc\s+(.+)", re.IGNORECASE)
 SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE)
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE)
@@ -183,6 +187,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
         status_msg = f"Parsing: {os.path.basename(fp)} ({fidx}/{num_files})                "
         print(f"\r{status_msg}", end="", flush=True)
         in_comment = False
+        current_gdx_file = None
         i = 0
         while i < len(lines):
             line = lines[i].rstrip('\n')
@@ -203,6 +208,23 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
             if i + 1 < len(lines) and lines[i+1].lstrip().startswith(','):
                 line += ' ' + lines[i+1].strip()
                 i += 1
+
+            # GDX input detection
+            gm = GDXIN_RE.match(line)
+            if gm:
+                current_gdx_file = gm.group(1).strip().strip('"\'')
+                i += 1
+                continue
+
+            # Load detection
+            lm = LOAD_RE.match(line) or LOADDC_RE.match(line)
+            if lm:
+                symbols_list = [s.strip() for s in lm.group(1).strip().split(',') if s.strip()]
+                for sym_name in symbols_list:
+                    sym = ensure_symbol(sym_name, 'unknown')
+                    sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(fp, i+1), deps=set(), lhs=sym_name, gdx_file=current_gdx_file))
+                i += 1
+                continue
 
             # Declarations
             if DECL_START_RE.match(line):
@@ -452,6 +474,8 @@ def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited:
                 out.append("  "*depth + f"  ├─ assignment at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
             elif d.kind == 'equation':
                 out.append("  "*depth + f"  ├─ equation at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+            elif d.kind == 'gdx_load':
+                out.append("  "*depth + f"  ├─ GDX load at {d.loc.file}:{d.loc.line} from '{d.gdx_file}'")
             else:
                 out.append("  "*depth + f"  ├─ {d.kind} at {d.loc.file}:{d.loc.line}")
             for dep in sorted(d.deps):
