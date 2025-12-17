@@ -246,8 +246,17 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 if 'variables' in line.lower() and VAR_DECL_RE.match(line) is None and not line.strip().endswith(';'):
                     accumulated = line
                     j = i + 1
+                    inner_comment = in_comment
                     while j < len(lines):
                         next_line = lines[j].rstrip('\n')
+                        next_stripped = next_line.strip().lower()
+                        if next_stripped == '$ontext':
+                            inner_comment = True
+                        elif next_stripped == '$offtext':
+                            inner_comment = False
+                        elif next_line.strip().startswith('*') or inner_comment:
+                            j += 1
+                            continue
                         accumulated += ' ' + next_line.strip()
                         if next_line.strip().endswith(';'):
                             # Parse the full variable declaration
@@ -278,8 +287,17 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                     # Read subsequent lines until a lone ';' or next declaration
                     j = i + 1
                     table_lines: List[str] = []
+                    inner_comment = in_comment
                     while j < len(lines):
                         l2 = lines[j].rstrip('\n')
+                        next_stripped = l2.strip().lower()
+                        if next_stripped == '$ontext':
+                            inner_comment = True
+                        elif next_stripped == '$offtext':
+                            inner_comment = False
+                        elif l2.strip().startswith('*') or inner_comment:
+                            j += 1
+                            continue
                         if l2.strip() == ';':
                             table_lines.append(l2)
                             j += 1
@@ -415,8 +433,17 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
             if re.match(r'^\s*model\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
                 accumulated = line
                 j = i + 1
+                inner_comment = in_comment
                 while j < len(lines):
                     next_line = lines[j].rstrip('\n')
+                    next_stripped = next_line.strip().lower()
+                    if next_stripped == '$ontext':
+                        inner_comment = True
+                    elif next_stripped == '$offtext':
+                        inner_comment = False
+                    elif next_line.strip().startswith('*') or inner_comment:
+                        j += 1
+                        continue
                     accumulated += ' ' + next_line.strip()
                     if next_line.strip().endswith(';'):
                         # Parse the full model
@@ -458,8 +485,17 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 ename = em_start.group(1)
                 accumulated = line
                 j = i + 1
+                inner_comment = in_comment
                 while j < len(lines):
                     next_line = lines[j].rstrip('\n')
+                    next_stripped = next_line.strip().lower()
+                    if next_stripped == '$ontext':
+                        inner_comment = True
+                    elif next_stripped == '$offtext':
+                        inner_comment = False
+                    elif next_line.strip().startswith('*') or inner_comment:
+                        j += 1
+                        continue
                     accumulated += ' ' + next_line.strip()
                     if next_line.strip().endswith(';'):
                         # Found the end, parse the full equation
@@ -495,8 +531,17 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 atgt = am_start.group(1)
                 accumulated = line
                 j = i + 1
+                inner_comment = in_comment
                 while j < len(lines):
                     next_line = lines[j].rstrip('\n')
+                    next_stripped = next_line.strip().lower()
+                    if next_stripped == '$ontext':
+                        inner_comment = True
+                    elif next_stripped == '$offtext':
+                        inner_comment = False
+                    elif next_line.strip().startswith('*') or inner_comment:
+                        j += 1
+                        continue
                     accumulated += ' ' + next_line.strip()
                     if next_line.strip().endswith(';'):
                         # Check if it's an assignment by having =
