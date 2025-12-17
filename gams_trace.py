@@ -478,11 +478,12 @@ def explain_equation(symbols: Dict[str, Symbol], eq_name: str) -> List[str]:
 def main():
     ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Parses with --parse, then loads from gams_trace.parse for queries.")
     ap.add_argument('--parse', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solve statements')
-    ap.add_argument('--solve-number', type=int, help='ID of the solve to trace (from previous --parse listing)')
-    ap.add_argument('--show-solves', action='store_true', help='Show detected solve statement(s)')
+    ap.add_argument('--list-solves', action='store_true', help='List all detected solve statements')
+    ap.add_argument('--solve', action='store_true', help='Show details for a specific solve statement')
     ap.add_argument('--objective', action='store_true', help='Trace objective variable/equation')
     ap.add_argument('--equation', help='Trace a specific equation by name')
     ap.add_argument('--dump-symbol', help='Trace a symbol (parameter/scalar/table/variable)')
+    ap.add_argument('solve_number', nargs='?', type=int, help='Solve number (1+) when using --solve, --objective, --equation, or --dump-symbol (optional: will prompt if omitted)')
     args = ap.parse_args()
 
     if len(sys.argv) == 1:
@@ -494,7 +495,7 @@ def main():
     solves = None
 
     if args.parse:
-        if any([args.solve_number, args.show_solves, args.objective, args.equation, args.dump_symbol]):
+        if any([args.solve_number, args.list_solves, args.solve, args.objective, args.equation, args.dump_symbol]):
             print("Error: --parse is standalone for parsing. Other flags require loading from gams_trace.parse.")
             ap.print_help()
             sys.exit(1)
@@ -521,7 +522,7 @@ def main():
                 f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
 
     else:
-        if any([args.show_solves, args.objective, args.equation, args.dump_symbol, args.solve_number]):
+        if any([args.list_solves, args.solve, args.objective, args.equation, args.dump_symbol, args.solve_number]):
             if not os.path.exists('gams_trace.parse'):
                 print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with --parse first to parse and save data.")
                 sys.exit(1)
@@ -538,23 +539,37 @@ def main():
                 ap.print_help()
                 sys.exit(1)
 
-    selected_solve = None
-    if args.show_solves or args.objective or args.equation or args.dump_symbol:
-        if not args.solve_number:
-            print("Solve number required. Available solves:")
-            for idx, s in enumerate(solves, start=1):
-                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-            print("Please specify solve number using --solve-number")
-            sys.exit(1)
-        idx = args.solve_number
-        if idx < 1 or idx > len(solves):
-            print("Invalid solve number. Available solves:")
-            for idx, s in enumerate(solves, start=1):
-                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-            sys.exit(1)
-        selected_solve = solves[idx - 1]
+    if args.list_solves:
+        print("Solve statements:")
+        for idx, s in enumerate(solves, start=1):
+            print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+        print()
+        sys.exit(0)
 
-    if args.show_solves:
+    selected_solve = None
+    if args.solve or args.objective or args.equation or args.dump_symbol:
+        if args.solve_number is None:
+            print("Available solves:")
+            for idx, s in enumerate(solves, start=1):
+                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+            while True:
+                try:
+                    solve_num = int(input(f"Enter solve number (1-{len(solves)}): "))
+                    if 1 <= solve_num <= len(solves):
+                        selected_solve = solves[solve_num - 1]
+                        break
+                except ValueError:
+                    pass
+        else:
+            idx = args.solve_number
+            if idx < 1 or idx > len(solves):
+                print("Invalid solve number. Available solves:")
+                for idx, s in enumerate(solves, start=1):
+                    print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                sys.exit(1)
+            selected_solve = solves[idx - 1]
+
+    if args.solve:
         s = selected_solve
         print(f"Solve: model={s.model}, sense={s.sense}, objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
         print()
@@ -591,7 +606,7 @@ def main():
             print(ln)
         print()
 
-    if not (args.parse or args.show_solves or args.objective or args.equation or args.dump_symbol or args.solve_number):
+    if not (args.parse or args.list_solves or args.solve or args.objective or args.equation or args.dump_symbol or args.solve_number):
         print("Parsed symbols summary:")
         for name, sym in sorted(symbols.items()):
             print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")

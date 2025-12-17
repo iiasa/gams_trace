@@ -9,7 +9,7 @@ The `gams_trace.py` script:
 ***
 
 ## What the script edoes
-
+ 
 **Capabilities** (static analysis):
 
 *   **Includes:** Resolves `$include` and `$batinclude` to create a unified view of the codebase.
@@ -39,10 +39,17 @@ python gams_trace.py --parse path/to/main.gms
 Then, for tracing with a specified solve ID (automatically loads from `gams_trace.parse`):
 
 ```bash
-python gams_trace.py --solve-number 1 --show-solves
-python gams_trace.py --solve-number 1 --objective
-python gams_trace.py --equation eq_supply --solve-number 1
-python gams_trace.py --dump-symbol A --solve-number 1
+python gams_trace.py --list-solves
+python gams_trace.py --solve 1
+python gams_trace.py --objective 1
+python gams_trace.py --equation eq_supply 1
+python gams_trace.py --dump-symbol A 1
+```
+
+Or omit the solve number to get an interactive prompt:
+
+```bash
+python gams_trace.py --objective
 ```
 
 ### Typical outputs
@@ -50,8 +57,11 @@ python gams_trace.py --dump-symbol A --solve-number 1
 *   `--parse path/to/main.gms`:
     Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solve statements with IDs for selection (also persisted in `gams_trace.solves`).
 
-*   `--show-solves`:  
-    Shows where the LP solve(s) is/are declared: model name, sense, objective variable, and file:line.
+*   `--list-solves`:
+    Lists all detected solve statements with IDs.
+
+*   `--solve N`:
+    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line.
 
 *   `--objective`:  
     Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).  
@@ -123,7 +133,8 @@ solve m using lp minimizing Z;
 2.  Run it with Python 3:
 
 ```bash
-python gams_trace.py --parse /path/to/your/main.gms --objective
+python gams_trace.py --parse /path/to/your/main.gms
+python gams_trace.py --objective 1
 ```
 
 > If your codebase has nested includes, the script will follow `$include` and `$batinclude` relative to the root file’s directory.
