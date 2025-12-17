@@ -12,7 +12,7 @@ The `gams_trace.py` script:
 
 **Capabilities** (static analysis):
 
-*   **Includes:** Resolves `$include` and `$batinclude` to create a unified view of the codebase.
+*   **Includes:** Resolves `$include` and `$batinclude` to create a unified view of the codebase. Ignores comments (* lines and $ontext/$offtext blocks) during parsing to avoid interference with code analysis.
 *   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
 *   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values).
 *   **Assignments:** Records parameter/scalar assignments and their dependencies (e.g., `a(i) = b(i) + 0.1*c;` → `b` and `c`).
