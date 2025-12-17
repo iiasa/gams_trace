@@ -184,6 +184,21 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 symbols[name].stype = stype
         return symbols[name]
 
+    def skip_to_non_comment(lines: List[str], j: int, in_comment: bool) -> Tuple[int, str, bool]:
+        """Advance index to next non-comment line, updating comment state. Returns (new_index, next_line, new_in_comment). If at end, next_line=''."""
+        while j < len(lines):
+            line = lines[j].rstrip('\n')
+            stripped = line.strip().lower()
+            if stripped == '$ontext':
+                in_comment = True
+            elif stripped == '$offtext':
+                in_comment = False
+            elif line.strip().startswith('*') or in_comment:
+                j += 1
+                continue
+            return j, line, in_comment
+        return j, '', in_comment  # at end
+
     num_files = len(files)
     for fidx, (fp, lines) in enumerate(files, start=1):
         status_msg = f"Parsing: {os.path.basename(fp)} ({fidx}/{num_files})                "
@@ -247,16 +262,10 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                     accumulated = line
                     j = i + 1
                     inner_comment = in_comment
-                    while j < len(lines):
-                        next_line = lines[j].rstrip('\n')
-                        next_stripped = next_line.strip().lower()
-                        if next_stripped == '$ontext':
-                            inner_comment = True
-                        elif next_stripped == '$offtext':
-                            inner_comment = False
-                        elif next_line.strip().startswith('*') or inner_comment:
-                            j += 1
-                            continue
+                    while True:
+                        j, next_line, inner_comment = skip_to_non_comment(lines, j, inner_comment)
+                        if not next_line:
+                            break
                         accumulated += ' ' + next_line.strip()
                         if next_line.strip().endswith(';'):
                             # Parse the full variable declaration
@@ -272,9 +281,6 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                             i = j
                             break
                         j += 1
-                    else:
-                        # No ; found, skip
-                        pass
                     i += 1
                     continue
                 # Tables block
@@ -288,16 +294,10 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                     j = i + 1
                     table_lines: List[str] = []
                     inner_comment = in_comment
-                    while j < len(lines):
-                        l2 = lines[j].rstrip('\n')
-                        next_stripped = l2.strip().lower()
-                        if next_stripped == '$ontext':
-                            inner_comment = True
-                        elif next_stripped == '$offtext':
-                            inner_comment = False
-                        elif l2.strip().startswith('*') or inner_comment:
-                            j += 1
-                            continue
+                    while True:
+                        j, l2, inner_comment = skip_to_non_comment(lines, j, inner_comment)
+                        if not l2:
+                            break
                         if l2.strip() == ';':
                             table_lines.append(l2)
                             j += 1
@@ -434,16 +434,10 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 accumulated = line
                 j = i + 1
                 inner_comment = in_comment
-                while j < len(lines):
-                    next_line = lines[j].rstrip('\n')
-                    next_stripped = next_line.strip().lower()
-                    if next_stripped == '$ontext':
-                        inner_comment = True
-                    elif next_stripped == '$offtext':
-                        inner_comment = False
-                    elif next_line.strip().startswith('*') or inner_comment:
-                        j += 1
-                        continue
+                while True:
+                    j, next_line, inner_comment = skip_to_non_comment(lines, j, inner_comment)
+                    if not next_line:
+                        break
                     accumulated += ' ' + next_line.strip()
                     if next_line.strip().endswith(';'):
                         # Parse the full model
@@ -455,9 +449,6 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         i = j
                         break
                     j += 1
-                else:
-                    # No ; found, skip
-                    pass
                 i += 1
                 continue
 
@@ -486,16 +477,10 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 accumulated = line
                 j = i + 1
                 inner_comment = in_comment
-                while j < len(lines):
-                    next_line = lines[j].rstrip('\n')
-                    next_stripped = next_line.strip().lower()
-                    if next_stripped == '$ontext':
-                        inner_comment = True
-                    elif next_stripped == '$offtext':
-                        inner_comment = False
-                    elif next_line.strip().startswith('*') or inner_comment:
-                        j += 1
-                        continue
+                while True:
+                    j, next_line, inner_comment = skip_to_non_comment(lines, j, inner_comment)
+                    if not next_line:
+                        break
                     accumulated += ' ' + next_line.strip()
                     if next_line.strip().endswith(';'):
                         # Found the end, parse the full equation
@@ -508,9 +493,6 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         i = j
                         break
                     j += 1
-                else:
-                    # No semicolon found, treat as single line attempt
-                    pass
                 i += 1
                 continue
 
@@ -532,16 +514,10 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 accumulated = line
                 j = i + 1
                 inner_comment = in_comment
-                while j < len(lines):
-                    next_line = lines[j].rstrip('\n')
-                    next_stripped = next_line.strip().lower()
-                    if next_stripped == '$ontext':
-                        inner_comment = True
-                    elif next_stripped == '$offtext':
-                        inner_comment = False
-                    elif next_line.strip().startswith('*') or inner_comment:
-                        j += 1
-                        continue
+                while True:
+                    j, next_line, inner_comment = skip_to_non_comment(lines, j, inner_comment)
+                    if not next_line:
+                        break
                     accumulated += ' ' + next_line.strip()
                     if next_line.strip().endswith(';'):
                         # Check if it's an assignment by having =
@@ -554,9 +530,6 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         i = j
                         break
                     j += 1
-                else:
-                    # No semicolon found, skip
-                    pass
                 i += 1
                 continue
 
