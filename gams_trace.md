@@ -42,11 +42,11 @@ Then, for tracing with a specified solve ID (automatically loads from `gams_trac
 python gams_trace.py --list-solves
 python gams_trace.py --solve 1
 python gams_trace.py --objective 1
-python gams_trace.py --equation eq_supply 1
-python gams_trace.py --dump-symbol A 1
+python gams_trace.py --equation eq_supply
+python gams_trace.py --dump-symbol A
 ```
 
-Or omit the solve number to get an interactive prompt:
+Or omit the solve number to get an interactive prompt (for --solve and --objective):
 
 ```bash
 python gams_trace.py --objective
@@ -61,17 +61,17 @@ python gams_trace.py --objective
     Lists all detected solve statements with IDs.
 
 *   `--solve N`:
-    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line.
+    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line. Requires solve number or prompts.
 
-*   `--objective`:  
-    Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).  
-    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines.
+*   `--objective`:
+    Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
+    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines. Requires solve number or prompts.
 
-*   `--equation eq_name`:  
-    Prints the equation definition and traces **all parameters** appearing on LHS/RHS. Useful for seeing where a constraint’s RHS originates (e.g., `demand(j)` coming from a table or assignment).
+*   `--equation eq_name`:
+    Prints the equation definition and traces **all parameters** appearing on LHS/RHS. Works globally without solve context.
 
-*   `--dump-symbol A`:  
-    Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies.
+*   `--dump-symbol A`:
+    Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies. Works globally without solve context.
 
 ***
 

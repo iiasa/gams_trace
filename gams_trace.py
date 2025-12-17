@@ -381,6 +381,33 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 i += 1
                 continue
 
+            # Check for multi-line assignment start
+            am_start_re = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?", re.IGNORECASE)
+            am_start = am_start_re.match(line)
+            if am_start and not line.strip().endswith(';'):
+                atgt = am_start.group(1)
+                accumulated = line
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].rstrip('\n')
+                    accumulated += ' ' + next_line.strip()
+                    if next_line.strip().endswith(';'):
+                        # Check if it's an assignment by having =
+                        if '=' in accumulated:
+                            eq_pos = accumulated.find('=')
+                            expr = accumulated[eq_pos+1:].strip().rstrip(';')
+                            deps = find_idents(expr)
+                            sym = ensure_symbol(atgt, symbols.get(atgt, Symbol(atgt, 'unknown')).stype or 'unknown')
+                            sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(fp, i+1), deps=deps, lhs=atgt.strip()))
+                        i = j
+                        break
+                    j += 1
+                else:
+                    # No semicolon found, skip
+                    pass
+                i += 1
+                continue
+
             # Assignments (parameters/scalars/etc.)
             am = ASSIGN_RE.match(line)
             if am:
@@ -483,10 +510,10 @@ def main():
     ap.add_argument('--objective', action='store_true', help='Trace objective variable/equation')
     ap.add_argument('--equation', help='Trace a specific equation by name')
     ap.add_argument('--dump-symbol', help='Trace a symbol (parameter/scalar/table/variable)')
-    ap.add_argument('solve_number', nargs='?', type=int, help='Solve number (1+) when using --solve, --objective, --equation, or --dump-symbol (optional: will prompt if omitted)')
+    ap.add_argument('solve_number', nargs='?', type=int, help='Solve number (1+) when using --solve or --objective (optional: will prompt if omitted)')
     args = ap.parse_args()
 
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 and not os.path.exists('gams_trace.parse'):
         ap.print_help()
         sys.exit(1)
 
@@ -547,7 +574,7 @@ def main():
         sys.exit(0)
 
     selected_solve = None
-    if args.solve or args.objective or args.equation or args.dump_symbol:
+    if args.solve or args.objective:
         if args.solve_number is None:
             print("Available solves:")
             for idx, s in enumerate(solves, start=1):
