@@ -69,16 +69,16 @@ IDENT_RE = re.compile(r"\b([A-Za-z_]\w*)\b")
 BUILTINS = {"sum","smin","smax","min","max","ord","card","power","exp","log","abs",
             "uniform","normal","floor","ceil","round","yes","no"}
 DECL_START_RE = re.compile(r"^\s*(sets?|parameters?|scalars?|tables?|variables?|equations?)\b", re.IGNORECASE)
-INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE)
-GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE)
-LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE)
-LOADDC_RE = re.compile(r"^\s*\$loaddc\s+(.+)", re.IGNORECASE)
-SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE)
-MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE)
-ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE)
-EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE)
-VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s+(.+);", re.IGNORECASE)
-TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE)
+INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE | re.DOTALL)
+GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE | re.DOTALL)
+LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE | re.DOTALL)
+LOADDC_RE = re.compile(r"^\s*\$loaddc\s+(.+)", re.IGNORECASE | re.DOTALL)
+SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE | re.DOTALL)
+MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE | re.DOTALL)
+ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
+EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
+VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s+(.+);", re.IGNORECASE | re.DOTALL)
+TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
 
 
 def norm_ident(s: str) -> str:
@@ -240,6 +240,32 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                         sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(fp, i+1)))
                     i += 1
                     continue
+                # Check for multi-line variable declaration
+                if 'variables' in line.lower() and VAR_DECL_RE.match(line) is None and not line.strip().endswith(';'):
+                    accumulated = line
+                    j = i + 1
+                    while j < len(lines):
+                        next_line = lines[j].rstrip('\n')
+                        accumulated += ' ' + next_line.strip()
+                        if next_line.strip().endswith(';'):
+                            # Parse the full variable declaration
+                            var_match = VAR_DECL_RE.search(accumulated)
+                            if var_match and var_match.group(2):
+                                var_list = var_match.group(2).strip()
+                                for v in re.split(r",", var_list):
+                                    vname = v.strip()
+                                    if not vname:
+                                        continue
+                                    sym = ensure_symbol(vname, 'variable')
+                                    sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(fp, i+1)))
+                            i = j
+                            break
+                        j += 1
+                    else:
+                        # No ; found, skip
+                        pass
+                    i += 1
+                    continue
                 # Tables block
                 th = TABLE_HEAD_RE.match(line)
                 if th:
@@ -349,7 +375,30 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 i += 1
                 continue
 
-            # Model membership
+            # Check for multi-line model start
+            if re.match(r'^\s*model\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
+                accumulated = line
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].rstrip('\n')
+                    accumulated += ' ' + next_line.strip()
+                    if next_line.strip().endswith(';'):
+                        # Parse the full model
+                        model_match = MODEL_RE.search(accumulated)
+                        if model_match:
+                            mname = model_match.group(1)
+                            eqs = [e.strip() for e in model_match.group(2).split(',') if e.strip()]
+                            models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(fp, i+1)))
+                        i = j
+                        break
+                    j += 1
+                else:
+                    # No ; found, skip
+                    pass
+                i += 1
+                continue
+
+            # Model membership (single line)
             mm = MODEL_RE.search(line)
             if mm:
                 mname = mm.group(1)

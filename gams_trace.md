@@ -116,12 +116,13 @@ solve m using lp minimizing Z;
 
 ## How it’s built (technical notes)
 
-*   **Parsing** uses regular expressions for common GAMS patterns:
+*   **Parsing** uses regular expressions for common GAMS patterns, with line accumulation for multi-line constructs to handle cases where semicolons appear on different lines than the start:
     *   Declarations (`Sets`, `Parameters`, `Tables`, `Variables`, `Equations`)
     *   Assignments: `name(index?) = expression;`
     *   Equations: `eq .. LHS =l|e|g= RHS;`
     *   Model membership: `model m / eq1, eq2 /;`
     *   Solve: `solve m using lp minimizing Z;`
+    *   GDX loads: `$gdxin`, `$load`, `$loaddc`
 *   It computes and prints **dependency chains**. For example, if `c(i) = base(i) + delta;` and `base(i)` comes from a `Table`, you’ll see:
         • c [parameter]
           ├─ assignment at mymodel.gms:42: c(i) = base(i) + delta;
