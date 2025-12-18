@@ -42,11 +42,69 @@ First, parse the GAMS model (this will save parsed data to `gams_trace.parse` an
 python gams_trace.py parse path/to/main.gms
 ```
 
-Then, for tracing with a specified solve ID (automatically loads from `gams_trace.parse`):
+### Listing Commands
+
+First, parse the model as above. Then list components:
 
 ```bash
 python gams_trace.py list solves
 python gams_trace.py list solve 1
+python gams_trace.py list sets
+python gams_trace.py list parameters
+python gams_trace.py list scalars
+python gams_trace.py list tables
+python gams_trace.py list variables
+python gams_trace.py list equations
+python gams_trace.py list set MY_SET
+python gams_trace.py list parameter MY_PARAM
+python gams_trace.py list scalar MY_SCALAR
+python gams_trace.py list table MY_TABLE
+python gams_trace.py list variable MY_VAR
+python gams_trace.py list equation MY_EQ
+```
+
+Typical outputs for listing:
+
+*   `parse path/to/main.gms`:
+    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solve statements with IDs for selection (also persisted in `gams_trace.solves`).
+
+*   `list solves`:
+    Lists all detected solve statements with IDs.
+
+*   `list solve N`:
+    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line. Requires solve number.
+
+*   `list sets`:
+    Lists all defined sets (e.g., - Myset).
+
+*   `list parameters`:
+    Lists all defined parameters (e.g., - Myparam).
+
+*   `list scalars`:
+    Lists all defined scalars (e.g., - Mysc).
+
+*   `list tables`:
+    Lists all defined tables (e.g., - Mycost).
+
+*   `list variables`:
+    Lists all defined variables (e.g., - X).
+
+*   `list equations`:
+    Lists all defined equations (e.g., - Balance_eq).
+
+*   `list set MY_SET`:
+    Shows the definition location and first ≤5 lines of the set declaration.
+
+*   `list parameter MY_PARAM`:
+    Shows the definition location and first ≤5 lines of the parameter assignment/declaration.
+
+*   Similarly for `scalar`, `table`, `variable`, `equation`: shows definition location and first ≤5 lines.
+
+### Tracing Commands
+
+Trace dependencies:
+
+```bash
 python gams_trace.py trace objective 1
 python gams_trace.py trace eq_supply
 python gams_trace.py trace A
@@ -58,16 +116,7 @@ Or omit the solve number to get an interactive prompt (for trace objective):
 python gams_trace.py trace objective
 ```
 
-### Typical outputs
-
-*   `parse path/to/main.gms`:
-    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solve statements with IDs for selection (also persisted in `gams_trace.solves`).
-
-*   `list solves`:
-    Lists all detected solve statements with IDs.
-
-*   `list solve N`:
-    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line. Requires solve number.
+Typical outputs for tracing:
 
 *   `trace objective`:
     Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).

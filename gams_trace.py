@@ -629,11 +629,17 @@ def main():
     parse_sub.add_argument('gms_file', help='Path to root .gms file')
 
     # list subcommand
-    list_sub = subparsers.add_parser('list', help='List solves or specific solve details')
+    list_sub = subparsers.add_parser('list', help='List solves, models, symbols, or specific details')
     list_subs = list_sub.add_subparsers(dest='list_command')
     list_subs.add_parser('solves', help='List all detected solve statements')
     solve_sub = list_subs.add_parser('solve', help='Show details for a specific solve statement')
     solve_sub.add_argument('solve_number', type=int, help='Solve number (1+)')
+
+    # Symbol type commands: plural for list names, singular for definition
+    for typ in ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations']:
+        list_subs.add_parser(typ, help=f'List all {typ}')
+        singular = list_subs.add_parser(typ[:-1], help=f'Show definition of a {typ[:-1]}')
+        singular.add_argument('symbol_name', help=f'Name of the {typ[:-1]}')
 
     # trace subcommand
     trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations')
@@ -711,6 +717,42 @@ def main():
                 selected_solve = solves[solve_num - 1]
                 print(f"Solve: model={selected_solve.model}, sense={selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
                 print()
+            else:
+                # Handle symbol type lists
+                plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations']
+                singular_types = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation']
+                if args.list_command in plural_types:
+                    stype = args.list_command[:-1]  # Remove 's' to get singular stype
+                    names = [name for name, sym in sorted(symbols.items()) if sym.stype == stype]
+                    if names:
+                        print(f"{stype.title()}s:")
+                        for name in names:
+                            print(f"- {name}")
+                        print()
+                    else:
+                        print(f"No {stype}s found.")
+                        print()
+                elif args.list_command in singular_types:
+                    symbol_name = args.symbol_name
+                    stype = args.list_command
+                    sym = symbols.get(symbol_name)
+                    if sym and sym.stype == stype:
+                        # Show definition
+                        if sym.defs:
+                            d = sym.defs[0]  # Take first definition
+                            print(f"{stype.title()} {symbol_name} defined at {d.loc.file}:{d.loc.line}")
+                            # Show first <=5 lines of text
+                            lines = d.text.strip().split('\n')
+                            for i in range(min(5, len(lines))):
+                                print(lines[i])
+                            if len(lines) > 5:
+                                print("(...)")
+                        else:
+                            print(f"{stype.title()} {symbol_name} has no parsed definitions.")
+                        print()
+                    else:
+                        print(f"No {stype} named '{symbol_name}' found.")
+                        print()
 
         elif args.subcommand == 'trace':
             if args.trace_command == 'objective':
