@@ -5,6 +5,7 @@ import os
 import pickle
 import re
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -41,12 +42,12 @@ class Definition:
     gdx_file: Optional[str] = None  # for GDX-loaded symbols
 
 @dataclass
-class Symbol:
-    name: str
+class SymbolInfo:
+    original: str  # original name with case
     stype: str  # 'set','parameter','scalar','table','variable','equation','model'
-    dims: List[str] = field(default_factory=list)
     decls: List[Definition] = field(default_factory=list)
     defs: List[Definition] = field(default_factory=list)
+    dims: List[str] = field(default_factory=list)
     csv_file: Optional[str] = None  # for sets/tables loaded from CSV via $ondelim
 
 @dataclass
@@ -94,7 +95,7 @@ def find_idents(expr: str) -> Set[str]:
             continue
         if token.lower() in BUILTINS:
             continue
-        ids.add(token)
+        ids.add(token.lower())
     return ids
 
 # ----------------------------
@@ -183,20 +184,21 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
 # Parser
 # ----------------------------
 
-def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], List[ModelInfo], List[SolveInfo]]:
-    symbols: Dict[str, Symbol] = {}
+def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo]]:
+    symbols: Dict[str, SymbolInfo] = {}
     models: List[ModelInfo] = []
     solves: List[SolveInfo] = []
 
-    def ensure_symbol(name: str, stype: str) -> Symbol:
-        name = norm_ident(name)
-        if name not in symbols:
-            symbols[name] = Symbol(name=name, stype=stype)
+    def ensure_symbol(name: str, stype: str) -> SymbolInfo:
+        original = name
+        name_lower = name.lower()
+        if name_lower not in symbols:
+            symbols[name_lower] = SymbolInfo(original=original, stype=stype)
         else:
             # upgrade stype if unknown
-            if symbols[name].stype == "unknown":
-                symbols[name].stype = stype
-        return symbols[name]
+            if symbols[name_lower].stype == "unknown":
+                symbols[name_lower].stype = stype
+        return symbols[name_lower]
 
     num_files = len(files)
     for fidx, (fp, lines) in enumerate(files, start=1):
@@ -228,7 +230,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
                 symbols_list = [s.strip() for s in lm.group(1).strip().split(',') if s.strip()]
                 for sym_name in symbols_list:
                     sym = ensure_symbol(sym_name, 'unknown')
-                    sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(fp, i+1), deps=set(), lhs=sym_name, gdx_file=current_gdx_file))
+                    sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(fp, i+1), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
                 i += 1
                 continue
 
@@ -453,7 +455,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, Symbol], L
             # Solve detection
             sm = SOLVE_RE.search(line)
             if sm:
-                solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=sm.group(3), loc=SourceLoc(fp, i+1)))
+                solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=sm.group(3).strip().lower(), loc=SourceLoc(fp, i+1)))
                 i += 1
                 continue
 
