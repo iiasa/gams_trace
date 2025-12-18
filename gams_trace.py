@@ -79,7 +79,8 @@ SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE | re.DOTALL)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
 EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
-VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s+(.+);", re.IGNORECASE | re.DOTALL)
+VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s+(.+);", re.IGNORECASE)
+MULTI_VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
 
 
@@ -257,20 +258,22 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo
                         if not next_line.strip():
                             j += 1
                             continue
-                        accumulated += ' ' + next_line.strip()
+                        accumulated += '\n' + next_line.rstrip('\n')
                         if next_line.strip().endswith(';'):
                             # Parse the full variable declaration
-                            var_match = VAR_DECL_RE.search(accumulated)
+                            var_match = MULTI_VAR_DECL_RE.search(accumulated)
                             if var_match and var_match.group(2):
-                                var_list = var_match.group(2).strip()
-                                for v in re.split(r",", var_list):
-                                    vname = v.strip()
-                                    if not vname:
+                                # Handle multi-line variable declarations where each variable is on a separate line
+                                for line in var_match.group(2).split('\n'):
+                                    line = line.strip()
+                                    if not line or line.startswith('*') or not IDENT_RE.search(line):
                                         continue
-                                    sym = ensure_symbol(vname, 'variable')
+                                    m = IDENT_RE.search(line)
+                                    name = m.group(1)
+                                    sym = ensure_symbol(name, 'variable')
                                     sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(fp, i+1)))
-                            i = j
-                            break
+                                i = j
+                                break
                         j += 1
                     i += 1
                     continue
@@ -455,7 +458,9 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo
             # Solve detection
             sm = SOLVE_RE.search(line)
             if sm:
-                solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=sm.group(3).strip().lower(), loc=SourceLoc(fp, i+1)))
+                objvar = sm.group(3).strip()
+                solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=objvar, loc=SourceLoc(fp, i+1)))
+                ensure_symbol(objvar, 'variable')
                 i += 1
                 continue
 
@@ -516,7 +521,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo
                             eq_pos = accumulated.find('=')
                             expr = accumulated[eq_pos+1:].strip().rstrip(';')
                             deps = find_idents(expr)
-                            sym = ensure_symbol(atgt, symbols.get(atgt, Symbol(atgt, 'unknown')).stype or 'unknown')
+                            sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
                             sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(fp, i+1), deps=deps, lhs=atgt.strip()))
                         i = j
                         break
@@ -530,7 +535,7 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo
                 tgt = am.group(1)
                 expr = am.group(3)
                 deps = find_idents(expr)
-                sym = ensure_symbol(tgt, symbols.get(tgt, Symbol(tgt, 'unknown')).stype or 'unknown')
+                sym = ensure_symbol(tgt, symbols.get(tgt.lower(), SymbolInfo(original=tgt, stype='unknown')).stype or 'unknown')
                 sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(fp, i+1), deps=deps, lhs=tgt.strip()))
                 i += 1
                 continue
@@ -543,20 +548,22 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo
 # Tracing utilities
 # ----------------------------
 
-def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited: Optional[Set[str]] = None) -> List[str]:
+def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visited: Optional[Set[str]] = None) -> List[str]:
     """Return textual trace for a symbol: where its values come from (assignments, tables, deps)."""
-    name = norm_ident(name)
+    name = norm_ident(name).lower()
     if visited is None:
         visited = set()
     if name in visited:
-        return ["  "*depth + f"↪ {name} (cycle detected)"]
+        sym = symbols.get(name)
+        display_name = sym.original if sym else name
+        return ["  "*depth + f"↪ {display_name} (cycle detected)"]
     visited.add(name)
     out: List[str] = []
     sym = symbols.get(name)
     if not sym:
         out.append("  "*depth + f"✖ {name}: not declared/defined in parsed files")
         return out
-    out.append("  "*depth + f"• {name} [{sym.stype}]")
+    out.append("  "*depth + f"• {sym.original} [{sym.stype}]")
     if sym.csv_file:
         out.append("  "*depth + f"  ├─ data loaded from CSV '{sym.csv_file}'")
     if sym.defs:
@@ -583,7 +590,7 @@ def trace_symbol(symbols: Dict[str, Symbol], name: str, depth: int = 0, visited:
     return out
 
 
-def extract_objective(symbols: Dict[str, Symbol], solve: Optional[SolveInfo]) -> Tuple[Optional[SolveInfo], Optional[Definition]]:
+def extract_objective(symbols: Dict[str, SymbolInfo], solve: Optional[SolveInfo]) -> Tuple[Optional[SolveInfo], Optional[Definition]]:
     """Find objective variable from the solve statement and the equation/assignment that defines it (if present)."""
     if not solve:
         return None, None
@@ -602,15 +609,15 @@ def extract_objective(symbols: Dict[str, Symbol], solve: Optional[SolveInfo]) ->
     return s, None
 
 
-def explain_equation(symbols: Dict[str, Symbol], eq_name: str) -> List[str]:
-    eq = symbols.get(eq_name)
+def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str) -> List[str]:
+    eq = symbols.get(eq_name.lower()) if eq_name else None
     if not eq or eq.stype != 'equation':
         return [f"Equation '{eq_name}' not found."]
     out: List[str] = []
     for d in eq.defs:
         if d.kind != 'equation':
             continue
-        out.append(f"Equation {eq_name} defined at {d.loc.file}:{d.loc.line}")
+        out.append(f"Equation {eq.original} defined at {d.loc.file}:{d.loc.line}")
         out.append(d.text.strip())
         out.append("Dependencies:")
         for dep in sorted(d.deps):
@@ -662,8 +669,11 @@ def main():
         with open('gams_trace.parse', 'rb') as f:
             symbols, models, solves = pickle.load(f)
         print("Parsed symbols summary:")
-        for name, sym in sorted(symbols.items()):
-            print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")
+        stype_counts = defaultdict(int)
+        for sym in symbols.values():
+            stype_counts[sym.stype] += 1
+        for stype, count in sorted(stype_counts.items()):
+            print(f"{stype}: {count}")
         print("\nTip: use 'trace objective', 'trace <eqname>', or 'trace <symbol>' to see detailed traces.")
         sys.exit(0)
 
@@ -686,12 +696,22 @@ def main():
             pickle.dump((symbols, models, solves), f)
         print("\rParsing complete, saved parse tree to gams_trace.parse", flush=True)
 
-        # Do list-solves
-        print("\nSolve statements:")
+        # Print summary
+        stype_counts = defaultdict(int)
+        for sym in symbols.values():
+            stype_counts[sym.stype] += 1
+        print(f"solves: {len(solves)}")
+        expected_stypes = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknown']
+        all_stypes = expected_stypes + [s for s in stype_counts if s not in expected_stypes]
+        for stype in sorted(all_stypes):
+            plural_stype = stype + "s" if stype not in ("solves", "unknown") else stype
+            count = stype_counts.get(stype, 0)
+            print(f"{plural_stype}: {count}")
+
+        # Write detailed solves to file
         with open('gams_trace.solves', 'w') as f:
             f.write(f"parse: {args.gms_file}\n")
             for idx, s in enumerate(solves, start=1):
-                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                 f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
 
     else:
@@ -725,7 +745,7 @@ def main():
                 singular_types = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation']
                 if args.list_command in plural_types:
                     stype = args.list_command[:-1]  # Remove 's' to get singular stype
-                    names = [name for name, sym in sorted(symbols.items()) if sym.stype == stype]
+                    names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
                     if names:
                         print(f"{stype.title()}s:")
                         for name in names:
@@ -737,12 +757,12 @@ def main():
                 elif args.list_command in singular_types:
                     symbol_name = args.symbol_name
                     stype = args.list_command
-                    sym = symbols.get(symbol_name)
+                    sym = symbols.get(symbol_name.lower()) if symbol_name else None
                     if sym and sym.stype == stype:
                         # Show definition
                         if sym.defs:
                             d = sym.defs[0]  # Take first definition
-                            print(f"{stype.title()} {symbol_name} defined at {d.loc.file}:{d.loc.line}")
+                            print(f"{stype.title()} {sym.original} defined at {d.loc.file}:{d.loc.line}")
                             # Show first <=5 lines of text
                             lines = d.text.strip().split('\n')
                             for i in range(min(5, len(lines))):
@@ -750,7 +770,7 @@ def main():
                             if len(lines) > 5:
                                 print("(...)")
                         else:
-                            print(f"{stype.title()} {symbol_name} has no parsed definitions.")
+                            print(f"{stype.title()} {sym.original} has no parsed definitions.")
                         print()
                     else:
                         print(f"No {stype} named '{symbol_name}' found.")
@@ -800,7 +820,7 @@ def main():
             else:
                 # trace target (symbol or equation)
                 name = args.target
-                sym = symbols.get(name)
+                sym = symbols.get(name.lower()) if name else None
                 if sym and sym.stype == 'equation':
                     for ln in explain_equation(symbols, name):
                         print(ln)

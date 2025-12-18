@@ -36,7 +36,27 @@ The `gams_trace.py` script:
 
 ## Usage
 
-First, parse the GAMS model (this will save parsed data to `gams_trace.parse` and list all available solves in `gams_trace.solves`):
+If parse data (from a prior run) exists, running without arguments displays a summary of symbol types and counts:
+
+```bash
+python gams_trace.py
+```
+
+Example output:
+```
+Parsed symbols summary:
+equations: 6
+parameters: 164
+scalars: 9
+sets: 173
+tables: 61
+variables: 0
+unknown: 1348
+
+Tip: use 'trace objective', 'trace <eqname>', or 'trace <symbol>' to see detailed traces.
+```
+
+First, parse the GAMS model (this will save parsed data to `gams_trace.parse` and list aggregate counts of solves and symbols, including the number of unidentified symbols; detailed solve information is saved to `gams_trace.solves`):
 
 ```bash
 python gams_trace.py parse path/to/main.gms
@@ -44,7 +64,7 @@ python gams_trace.py parse path/to/main.gms
 
 ### Listing Commands
 
-First, parse the model as above. Then list components:
+First, parse the model as above. Then list components. Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
 
 ```bash
 python gams_trace.py list solves
@@ -66,7 +86,7 @@ python gams_trace.py list equation MY_EQ
 Typical outputs for listing:
 
 *   `parse path/to/main.gms`:
-    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solve statements with IDs for selection (also persisted in `gams_trace.solves`).
+    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
 
 *   `list solves`:
     Lists all detected solve statements with IDs.
