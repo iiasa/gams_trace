@@ -39,44 +39,44 @@ The `gams_trace.py` script:
 First, parse the GAMS model (this will save parsed data to `gams_trace.parse` and list all available solves in `gams_trace.solves`):
 
 ```bash
-python gams_trace.py --parse path/to/main.gms
+python gams_trace.py parse path/to/main.gms
 ```
 
 Then, for tracing with a specified solve ID (automatically loads from `gams_trace.parse`):
 
 ```bash
-python gams_trace.py --list-solves
-python gams_trace.py --solve 1
-python gams_trace.py --objective 1
-python gams_trace.py --equation eq_supply
-python gams_trace.py --dump-symbol A
+python gams_trace.py list solves
+python gams_trace.py list solve 1
+python gams_trace.py trace objective 1
+python gams_trace.py trace eq_supply
+python gams_trace.py trace A
 ```
 
-Or omit the solve number to get an interactive prompt (for --solve and --objective):
+Or omit the solve number to get an interactive prompt (for trace objective):
 
 ```bash
-python gams_trace.py --objective
+python gams_trace.py trace objective
 ```
 
 ### Typical outputs
 
-*   `--parse path/to/main.gms`:
+*   `parse path/to/main.gms`:
     Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists all solve statements with IDs for selection (also persisted in `gams_trace.solves`).
 
-*   `--list-solves`:
+*   `list solves`:
     Lists all detected solve statements with IDs.
 
-*   `--solve N`:
-    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line. Requires solve number or prompts.
+*   `list solve N`:
+    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line. Requires solve number.
 
-*   `--objective`:
+*   `trace objective`:
     Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
     Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines. Requires solve number or prompts.
 
-*   `--equation eq_name`:
+*   `trace <eq_name>`:
     Prints the equation definition and traces **all parameters** appearing on LHS/RHS. Works globally without solve context.
 
-*   `--dump-symbol A`:
+*   `trace <symbol>`:
     Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies. Works globally without solve context.
 
 ***
@@ -110,8 +110,8 @@ Model m / obj, supply, satisfy /;
 solve m using lp minimizing Z;
 ```
 
-*   `--objective`: will show the `obj` equation and trace `cost` to the `Table` block (and print entries).
-*   `--equation satisfy`: will trace `demand(j)` to the inline parameter assignment.
+*   `trace objective`: will show the `obj` equation and trace `cost` to the `Table` block (and print entries).
+*   `trace satisfy`: will trace `demand(j)` to the inline parameter assignment.
 
 ***
 
@@ -140,8 +140,8 @@ solve m using lp minimizing Z;
 2.  Run it with Python 3:
 
 ```bash
-python gams_trace.py --parse /path/to/your/main.gms
-python gams_trace.py --objective 1
+python gams_trace.py parse /path/to/your/main.gms
+python gams_trace.py trace objective 1
 ```
 
 > If your codebase has nested includes, the script will follow `$include` and `$batinclude` relative to the root file’s directory.

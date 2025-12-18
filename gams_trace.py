@@ -621,32 +621,52 @@ def explain_equation(symbols: Dict[str, Symbol], eq_name: str) -> List[str]:
 # ----------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Parses with --parse, then loads from gams_trace.parse for queries.")
-    ap.add_argument('--parse', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solve statements')
-    ap.add_argument('--list-solves', action='store_true', help='List all detected solve statements')
-    ap.add_argument('--solve', action='store_true', help='Show details for a specific solve statement')
-    ap.add_argument('--objective', action='store_true', help='Trace objective variable/equation')
-    ap.add_argument('--equation', help='Trace a specific equation by name')
-    ap.add_argument('--dump-symbol', help='Trace a symbol (parameter/scalar/table/variable)')
-    ap.add_argument('solve_number', nargs='?', type=int, help='Solve number (1+) when using --solve or --objective (optional: will prompt if omitted)')
+    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Use subcommands: parse to load, list to list solves/solve, trace for tracing.")
+    subparsers = ap.add_subparsers(dest='subcommand', help='Available subcommands')
+
+    # parse subcommand
+    parse_sub = subparsers.add_parser('parse', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solve statements')
+    parse_sub.add_argument('gms_file', help='Path to root .gms file')
+
+    # list subcommand
+    list_sub = subparsers.add_parser('list', help='List solves or specific solve details')
+    list_subs = list_sub.add_subparsers(dest='list_command')
+    list_subs.add_parser('solves', help='List all detected solve statements')
+    solve_sub = list_subs.add_parser('solve', help='Show details for a specific solve statement')
+    solve_sub.add_argument('solve_number', type=int, help='Solve number (1+)')
+
+    # trace subcommand
+    trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations')
+    trace_subs = trace_sub.add_subparsers(dest='trace_command')
+    obj_sub = trace_subs.add_parser('objective', help='Trace objective for solve N')
+    obj_sub.add_argument('solve_number', nargs='?', type=int, help='Solve number (1+)')
+    # For tracing a symbol, it's just 'trace <symbol>', so no subparser, positional
+    trace_sub.add_argument('target', help='Symbol or equation name to trace')
+
     args = ap.parse_args()
 
-    if len(sys.argv) == 1 and not os.path.exists('gams_trace.parse'):
-        ap.print_help()
-        sys.exit(1)
+    # If no args provided and parse data exists, show summary
+
+    if args.subcommand is None:
+        if not os.path.exists('gams_trace.parse'):
+            ap.print_help()
+            sys.exit(1)
+        with open('gams_trace.parse', 'rb') as f:
+            symbols, models, solves = pickle.load(f)
+        print("Parsed symbols summary:")
+        for name, sym in sorted(symbols.items()):
+            print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")
+        print("\nTip: use 'trace objective', 'trace <eqname>', or 'trace <symbol>' to see detailed traces.")
+        sys.exit(0)
 
     symbols = None
     models = None
     solves = None
 
-    if args.parse:
-        if any([args.solve_number, args.list_solves, args.solve, args.objective, args.equation, args.dump_symbol]):
-            print("Error: --parse is standalone for parsing. Other flags require loading from gams_trace.parse.")
-            ap.print_help()
-            sys.exit(1)
+    if args.subcommand == 'parse':
         # Parse from root
         try:
-            files = load_gms(args.parse)
+            files = load_gms(args.gms_file)
         except Exception as e:
             print(f"Error loading files: {e}")
             sys.exit(1)
@@ -661,101 +681,90 @@ def main():
         # Do list-solves
         print("\nSolve statements:")
         with open('gams_trace.solves', 'w') as f:
-            f.write(f"parse: {args.parse}\n")
+            f.write(f"parse: {args.gms_file}\n")
             for idx, s in enumerate(solves, start=1):
                 print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                 f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
 
     else:
-        if any([args.list_solves, args.solve, args.objective, args.equation, args.dump_symbol, args.solve_number]):
-            if not os.path.exists('gams_trace.parse'):
-                print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with --parse first to parse and save data.")
-                sys.exit(1)
-            with open('gams_trace.parse', 'rb') as f:
-                symbols, models, solves = pickle.load(f)
-            print("Parsed data loaded from gams_trace.parse")
-        else:
-            # no flags, print summary only if parse exists, else help
-            if os.path.exists('gams_trace.parse'):
-                with open('gams_trace.parse', 'rb') as f:
-                    symbols, models, solves = pickle.load(f)
-                print("Parsed data loaded from gams_trace.parse")
-            else:
-                ap.print_help()
-                sys.exit(1)
+        # load from pickle
+        if not os.path.exists('gams_trace.parse'):
+            print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with 'parse <gms_file>' first.")
+            sys.exit(1)
+        with open('gams_trace.parse', 'rb') as f:
+            symbols, models, solves = pickle.load(f)
+        print("Parsed data loaded from gams_trace.parse")
 
-    if args.list_solves:
-        print("Solve statements:")
-        for idx, s in enumerate(solves, start=1):
-            print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-        print()
-        sys.exit(0)
-
-    selected_solve = None
-    if args.solve or args.objective:
-        if args.solve_number is None:
-            print("Available solves:")
-            for idx, s in enumerate(solves, start=1):
-                print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-            while True:
-                try:
-                    solve_num = int(input(f"Enter solve number (1-{len(solves)}): "))
-                    if 1 <= solve_num <= len(solves):
-                        selected_solve = solves[solve_num - 1]
-                        break
-                except ValueError:
-                    pass
-        else:
-            idx = args.solve_number
-            if idx < 1 or idx > len(solves):
-                print("Invalid solve number. Available solves:")
+        if args.subcommand == 'list':
+            if args.list_command == 'solves':
+                print("Solve statements:")
                 for idx, s in enumerate(solves, start=1):
                     print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-                sys.exit(1)
-            selected_solve = solves[idx - 1]
+                print()
+            elif args.list_command == 'solve':
+                solve_num = args.solve_number
+                if solve_num < 1 or solve_num > len(solves):
+                    print("Invalid solve number. Available solves:")
+                    for idx, s in enumerate(solves, start=1):
+                        print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                    sys.exit(1)
+                selected_solve = solves[solve_num - 1]
+                print(f"Solve: model={selected_solve.model}, sense={selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
+                print()
 
-    if args.solve:
-        s = selected_solve
-        print(f"Solve: model={s.model}, sense={s.sense}, objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-        print()
+        elif args.subcommand == 'trace':
+            if args.trace_command == 'objective':
+                solve_num = getattr(args, 'solve_number', None)
+                if solve_num is None:
+                    print("Available solves:")
+                    for idx, s in enumerate(solves, start=1):
+                        print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                    while True:
+                        try:
+                            solve_num = int(input(f"Enter solve number (1-{len(solves)}): "))
+                            if 1 <= solve_num <= len(solves):
+                                break
+                        except ValueError:
+                            pass
+                else:
+                    if solve_num < 1 or solve_num > len(solves):
+                        print("Invalid solve number. Available solves:")
+                        for idx, s in enumerate(solves, start=1):
+                            print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                        sys.exit(1)
+                target_solve = solves[solve_num - 1]
+                s, obj_def = extract_objective(symbols, target_solve)
+                if not s:
+                    print("No LP solve detected.")
+                else:
+                    print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
+                    if obj_def:
+                        kind_str = "equation" if obj_def.kind == 'equation' else 'assignment'
+                        print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
+                        print(obj_def.text.strip())
+                        print("\nTracing dependencies of the objective expression:")
+                        for dep in sorted(obj_def.deps):
+                            if dep == s.objvar:
+                                continue
+                            print(f"- {dep}")
+                            for ln in trace_symbol(symbols, dep, depth=1):
+                                print(ln)
+                    else:
+                        print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
+                print()
 
-    if args.objective:
-        target_solve = selected_solve
-        s, obj_def = extract_objective(symbols, target_solve)
-        if not s:
-            print("No LP solve detected.")
-        else:
-            print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
-            if obj_def:
-                kind_str = "equation" if obj_def.kind == 'equation' else 'assignment'
-                print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
-                print(obj_def.text.strip())
-                print("\nTracing dependencies of the objective expression:")
-                for dep in sorted(obj_def.deps):
-                    if dep == s.objvar:
-                        continue
-                    print(f"- {dep}")
-                    for ln in trace_symbol(symbols, dep, depth=1):
-                        print(ln)
             else:
-                print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
-        print()
-
-    if args.equation:
-        for ln in explain_equation(symbols, args.equation):
-            print(ln)
-        print()
-
-    if args.dump_symbol:
-        for ln in trace_symbol(symbols, args.dump_symbol):
-            print(ln)
-        print()
-
-    if not (args.parse or args.list_solves or args.solve or args.objective or args.equation or args.dump_symbol or args.solve_number):
-        print("Parsed symbols summary:")
-        for name, sym in sorted(symbols.items()):
-            print(f"- {name} [{sym.stype}] defs={len(sym.defs)}")
-        print("\nTip: use --objective, --equation EQNAME, or --dump-symbol NAME to see detailed traces.")
+                # trace target (symbol or equation)
+                name = args.target
+                sym = symbols.get(name)
+                if sym and sym.stype == 'equation':
+                    for ln in explain_equation(symbols, name):
+                        print(ln)
+                    print()
+                else:
+                    for ln in trace_symbol(symbols, name):
+                        print(ln)
+                    print()
 
 if __name__ == '__main__':
     main()
