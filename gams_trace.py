@@ -7,7 +7,7 @@ import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 class IncludeError(Exception):
     def __init__(self, message: str, include_file: str, include_loc: Optional[Tuple[str, int, str]]):
@@ -63,6 +63,12 @@ class SolveInfo:
     objvar: str
     loc: SourceLoc
 
+@dataclass
+class LineEntry:
+    text: str
+    file: str
+    line: int
+
 # ----------------------------
 # Utility helpers
 # ----------------------------
@@ -104,25 +110,25 @@ def find_idents(expr: str) -> Set[str]:
 # ----------------------------
 
 
-def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
-    """Return list of (file_path, lines) in dependency order."""
-    visited: Set[str] = set()
-    ordered: List[Tuple[str, List[str]]] = []
+def load_gms(root_path: str) -> List[LineEntry]:
+    """Return list of line entries with original file and line number in merged include order."""
+    merged_lines: List[LineEntry] = []
     base_dir = os.path.dirname(os.path.abspath(root_path))
 
-    def _load(fp: str, include_loc: Optional[Tuple[str, int, str]] = None, base_dir: str = base_dir):
+    def load_file(fp: str, depth: int = 0) -> None:
+        if depth > 100:
+            raise IncludeError(f"Recursion depth exceeded: {fp}", include_file=fp, include_loc=None)
+
         full = os.path.abspath(fp)
-        if full in visited:
-            return
-        status_msg = f"Loading: {os.path.basename(full)}                 "
+        status_msg = f"Loading: {os.path.basename(full)} ({len(merged_lines)} lines)                "
         print(f"\r{status_msg}", end="", flush=True)
-        visited.add(full)
+
         try:
             with open(full, 'r', encoding='utf-8', errors='ignore') as f:
                 raw_lines = f.readlines()
         except FileNotFoundError:
-            raise IncludeError(f"Included file not found: {fp}", include_file=fp, include_loc=include_loc)
-        # Strip comments from lines, replacing with empty strings to preserve line numbers
+            raise IncludeError(f"Included file not found: {fp}", include_file=fp, include_loc=None)
+        # Strip comments, but keep empty lines for line number tracking
         lines = []
         in_comment = False
         for raw_line in raw_lines:
@@ -132,60 +138,65 @@ def load_gms(root_path: str) -> List[Tuple[str, List[str]]]:
             elif stripped == '$offtext':
                 in_comment = False
             if raw_line.strip().startswith('*') or in_comment or stripped in ['$ontext', '$offtext']:
-                lines.append('')  # Empty line to preserve line count
+                lines.append('')  # Empty line to preserve line numbers
             else:
-                lines.append(raw_line)
-        # Process includes from decommented lines
-        in_comment = False
-        for i, line in enumerate(lines):
-            if not line.strip(): continue
-            stripped = line.strip().lower()
-            if stripped == '$ontext':
-                in_comment = True
-                continue
-            elif stripped == '$offtext':
-                in_comment = False
-                continue
-            elif line.strip().startswith('*') or in_comment:
-                continue
-            m = INCLUDE_RE.match(line)
-            if m:
-                rest = m.group(2).strip()  # Everything after $include / $batinclude
+                lines.append(raw_line.rstrip('\n'))
 
-                # Extract the first "argument" — either quoted string or first token
-                # Handle both quoted and unquoted paths
-                path_match = re.match(r'''^\s*(?:"([^"]+)"|'([^']+)'|(\S+))''', rest)
-                if path_match:
-                    # Take the first non-None group: "..." or '...' or bare word
-                    inc_path = next(g for g in path_match.groups() if g is not None)
+        # Process lines, handling includes inline
+        line_num = 1
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if not line:  # Empty line (comment)
+                # Do not include comment lines in merged output
+                pass
+            else:
+                m = INCLUDE_RE.match(line)
+                if m:
+                    rest = m.group(2).strip()
+                    path_match = re.match(r'''^\s*(?:"([^"]+)"|'([^']+)'|(\S+))''', rest)
+                    if path_match:
+                        path_str = path_match.group(0)
+                        inc_path = next(g for g in path_match.groups() if g is not None)
+                        args_start = len(path_str)
+                    else:
+                        inc_path = rest.split()[0]
+                        args_start = len(inc_path)
+                    inc_path = inc_path.strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                    if inc_path.lower().endswith('.csv'):
+                        # Add the $include line for CSV (not processed inline)
+                        merged_lines.append(LineEntry(text=line, file=full, line=line_num))
+                    else:
+                        is_bat = m.group(1) is not None
+                        if is_bat:
+                            # Extract args after the path
+                            after_path = rest[args_start:].strip()
+                            args = after_path.split() if after_path else []
+                        else:
+                            args = []
+                        inc_full = os.path.join(base_dir, inc_path)
+                        # Recursively load and inline the included file's content
+                        start_len = len(merged_lines)
+                        load_file(inc_full, depth + 1)
+                        # Apply substitutions to the newly added lines from sub-load
+                        if args:
+                            for j in range(start_len, len(merged_lines)):
+                                for idx, arg in enumerate(args, 1):
+                                    merged_lines[j].text = merged_lines[j].text.replace(f'%{idx}%', arg)
                 else:
-                    # Fallback: take up to first space (rare)
-                    inc_path = rest.split()[0]
+                    merged_lines.append(LineEntry(text=line, file=full, line=line_num))
+            line_num += 1
+            i += 1
 
-                # Clean quotes if still present (in case fallback used)
-                inc_path = inc_path.strip('"\'')
-                
-                # Substitute %X% with '/' as path separator
-                inc_path = inc_path.replace('%X%', '/')
-                
-                # Substitute %REGION% with REGION value
-                inc_path = inc_path.replace('%REGION%', REGION)
-                
-                inc_full = os.path.join(base_dir, inc_path)
-                include_type = 'batinclude' if m.group(1) else 'include'
-                if not inc_path.lower().endswith('.csv'):
-                    _load(inc_full, include_loc=(fp, i+1, include_type), base_dir=base_dir)
-        ordered.append((full, lines))
-
-    _load(root_path, base_dir=base_dir)
-    print(f"\rLoaded {len(ordered)} file(s).{'                                    '}", flush=True)
-    return ordered
+    load_file(root_path, 0)
+    print(f"\rLoaded {len(merged_lines)} lines from included files.{'                                    '}", flush=True)
+    return merged_lines
 
 # ----------------------------
 # Parser
 # ----------------------------
 
-def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo]]:
+def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo]]:
     symbols: Dict[str, SymbolInfo] = {}
     models: List[ModelInfo] = []
     solves: List[SolveInfo] = []
@@ -201,346 +212,344 @@ def parse_code(files: List[Tuple[str, List[str]]]) -> Tuple[Dict[str, SymbolInfo
                 symbols[name_lower].stype = stype
         return symbols[name_lower]
 
-    num_files = len(files)
-    for fidx, (fp, lines) in enumerate(files, start=1):
-        status_msg = f"Parsing: {os.path.basename(fp)} ({fidx}/{num_files})                "
-        print(f"\r{status_msg}", end="", flush=True)
-        current_gdx_file = None
-        i = 0
-        while i < len(lines):
-            line = lines[i].rstrip('\n')
-            if not line.strip():
+    status_msg = f"Parsing merged code ({len(entries)} lines)"
+    print(f"\r{status_msg}", end="", flush=True)
+    current_gdx_file = None
+    i = 0
+    while i < len(entries):
+        line = entries[i].text
+        if not line.strip():
+            i += 1
+            continue
+        # Merge continuation lines if trailing comma and next line
+        # (simple heuristic)
+        if i + 1 < len(entries) and entries[i+1].text.lstrip().startswith(','):
+            line += ' ' + entries[i+1].text.strip()
+            i += 1
+
+        # GDX input detection
+        gm = GDXIN_RE.match(line)
+        if gm:
+            current_gdx_file = gm.group(1).strip().strip('"\'')
+            i += 1
+            continue
+
+        # Load detection
+        lm = LOAD_RE.match(line) or LOADDC_RE.match(line)
+        if lm:
+            symbols_list = [s.strip() for s in lm.group(1).strip().split(',') if s.strip()]
+            for sym_name in symbols_list:
+                sym = ensure_symbol(sym_name, 'unknown')
+                sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
+            i += 1
+            continue
+
+        # Declarations
+        if DECL_START_RE.match(line):
+            # Variables special case
+            vdm = VAR_DECL_RE.match(line)
+            if vdm and vdm.group(2).strip():
+                var_list = vdm.group(2)
+                for v in re.split(r",", var_list):
+                    vname = v.strip()
+                    if not vname:
+                        continue
+                    sym = ensure_symbol(vname, 'variable')
+                    sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
                 i += 1
                 continue
-            # Merge continuation lines if trailing comma and next line
-            # (simple heuristic)
-            if i + 1 < len(lines) and lines[i+1].lstrip().startswith(','):
-                line += ' ' + lines[i+1].strip()
-                i += 1
-
-            # GDX input detection
-            gm = GDXIN_RE.match(line)
-            if gm:
-                current_gdx_file = gm.group(1).strip().strip('"\'')
-                i += 1
-                continue
-
-            # Load detection
-            lm = LOAD_RE.match(line) or LOADDC_RE.match(line)
-            if lm:
-                symbols_list = [s.strip() for s in lm.group(1).strip().split(',') if s.strip()]
-                for sym_name in symbols_list:
-                    sym = ensure_symbol(sym_name, 'unknown')
-                    sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(fp, i+1), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
-                i += 1
-                continue
-
-            # Declarations
-            if DECL_START_RE.match(line):
-                # Variables special case
-                vdm = VAR_DECL_RE.match(line)
-                if vdm:
-                    var_list = vdm.group(2)
-                    for v in re.split(r",", var_list):
-                        vname = v.strip()
-                        if not vname:
-                            continue
-                        sym = ensure_symbol(vname, 'variable')
-                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(fp, i+1)))
-                    i += 1
-                    continue
-                # Check for multi-line variable declaration
-                if 'variables' in line.lower() and VAR_DECL_RE.match(line) is None and not line.strip().endswith(';'):
-                    accumulated = line
-                    j = i + 1
-                    while j < len(lines):
-                        next_line = lines[j].rstrip('\n')
-                        if not next_line.strip():
-                            j += 1
-                            continue
-                        accumulated += '\n' + next_line.rstrip('\n')
-                        if next_line.strip().endswith(';'):
-                            # Parse the full variable declaration
-                            var_match = MULTI_VAR_DECL_RE.search(accumulated)
-                            if var_match and var_match.group(2):
-                                # Handle multi-line variable declarations where each variable is on a separate line
-                                for line in var_match.group(2).split('\n'):
-                                    line = line.strip()
-                                    if not line or line.startswith('*') or not IDENT_RE.search(line):
-                                        continue
-                                    m = IDENT_RE.search(line)
-                                    name = m.group(1)
-                                    sym = ensure_symbol(name, 'variable')
-                                    sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(fp, i+1)))
-                                i = j
-                                break
+            # Check for multi-line variable declaration
+            if 'variables' in line.lower() and not line.strip().endswith(';'):
+                accumulated = line
+                j = i + 1
+                while j < len(entries):
+                    next_line = entries[j].text
+                    if not next_line.strip():
                         j += 1
-                    i += 1
-                    continue
-                # Tables block
-                th = TABLE_HEAD_RE.match(line)
-                if th:
-                    tname = th.group(1)
-                    dims = [d.strip() for d in th.group(2).split(',')]
-                    sym = ensure_symbol(tname, 'table')
-                    sym.dims = dims
-                    # Read subsequent lines until a lone ';' or next declaration
-                    j = i + 1
-                    table_lines: List[str] = []
-                    while j < len(lines):
-                        l2 = lines[j].rstrip('\n')
-                        if not l2.strip():
-                            j += 1
-                            continue
-                        if l2.strip() == ';':
-                            table_lines.append(l2)
-                            j += 1
-                            break
-                        if DECL_START_RE.match(l2) or INCLUDE_RE.match(l2) or SOLVE_RE.search(l2) or MODEL_RE.search(l2):
-                            break
+                        continue
+                    accumulated += '\n' + next_line.rstrip('\n')
+                    if next_line.strip().endswith(';'):
+                        # Parse the full variable declaration
+                        var_match = MULTI_VAR_DECL_RE.search(accumulated)
+                        if var_match and var_match.group(2):
+                            # Handle multi-line variable declarations where each variable is on a separate line
+                            for line_text in var_match.group(2).split('\n'):
+                                line_text = line_text.strip()
+                                if not line_text or line_text.startswith('*') or not IDENT_RE.search(line_text):
+                                    continue
+                                m = IDENT_RE.search(line_text)
+                                name = m.group(1)
+                                sym = ensure_symbol(name, 'variable')
+                                sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        i = j
+                        break
+                    j += 1
+                i += 1
+                continue
+            # Tables block
+            th = TABLE_HEAD_RE.match(line)
+            if th:
+                tname = th.group(1)
+                dims = [d.strip() for d in th.group(2).split(',')]
+                sym = ensure_symbol(tname, 'table')
+                sym.dims = dims
+                # Read subsequent lines until a lone ';' or next declaration
+                j = i + 1
+                table_lines: List[str] = []
+                while j < len(entries):
+                    l2 = entries[j].text
+                    if not l2.strip():
+                        j += 1
+                        continue
+                    if l2.strip() == ';':
                         table_lines.append(l2)
                         j += 1
-                    # Check if data is from CSV
-                    if any('$ondelim' in tl.lower() for tl in table_lines) and any('$include' in tl.lower() and '.csv' in tl.lower() for tl in table_lines):
-                        for tl in table_lines:
-                            if '$include' in tl.lower():
-                                imm = INCLUDE_RE.match(tl.strip())
-                                if imm:
-                                    rest = imm.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
-                                    if rest.lower().endswith('.csv'):
-                                        sym.csv_file = rest
-                                        break
-                    # Parse only small tables line by line; for large tables, skip to avoid performance issues
-                    if len(table_lines) > 100:
-                        values = {}
-                        skipped = True
-                    else:
-                        values = {}
-                        skipped = False
-                        # Parse a simple table: header row with column keys, then rows as key + numbers
-                        # This is heuristic and works for common rectangular numeric tables.
-                        header_cols: List[str] = []
-                        values = {}
-                        # Find first non-empty line as header
-                        for idx, tl in enumerate(table_lines):
-                            if tl.strip() and not tl.strip().endswith(':') and not tl.strip() == ';':
-                                header_line = tl
-                                header_cols = [c.strip() for c in re.split(r"\s+", header_line.strip()) if c.strip()]
-                                start_row = i + 1 + idx + 1
-                                break
-                        else:
-                            header_cols = []
-                            start_row = i + 1
-                        # Parse rows
-                        r = start_row
-                        while r < i + 1 + len(table_lines):
-                            row_line = lines[r].rstrip('\n')
-                            if not row_line.strip() or row_line.strip() == ';':
-                                r += 1
-                                continue
-                            parts = [p for p in re.split(r"\s+", row_line.strip()) if p]
-                            if not parts:
-                                r += 1
-                                continue
-                            row_key = parts[0]
-                            for k, col in enumerate(header_cols[1:], start=1):
-                                if k >= len(parts):
-                                    continue
-                                try:
-                                    val = float(parts[k])
-                                    key_tuple = (row_key, col)
-                                    values[key_tuple] = val
-                                except ValueError:
-                                    pass
-                            r += 1
-                    defn = Definition(kind='table', text=line, loc=SourceLoc(fp, i+1), deps=set(), values=values, skipped=skipped)
-                    sym.defs.append(defn)
-                    i = j
-                    continue
-                # Other declarations (Sets, Parameters, Scalars, Equations)
-                # We record the line; detailed parsing of dimensions is skipped.
-                first_word = line.strip().split()[0].lower()
-                stype_map = {
-                    'set': 'set', 'sets': 'set',
-                    'parameter': 'parameter', 'parameters': 'parameter',
-                    'scalar': 'scalar', 'scalars': 'scalar',
-                    'equation': 'equation', 'equations': 'equation',
-                    'variables': 'variable'
-                }
-                stype = stype_map.get(first_word, 'unknown')
-                # Extract names (split by commas until ';')
-                decl_body = line
-                decl_parts = decl_body.split(None, 1)
-                if len(decl_parts) > 1:
-                    names = [n.strip() for n in re.split(r",", decl_parts[1])]
-                else:
-                    names = []
-                ondelim_found = False
-                csv_found = False
-                csv_path = None
-                for raw in names:
-                    # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
-                    m = IDENT_RE.search(raw)
-                    if m:
-                        name = m.group(1)
-                        sym = ensure_symbol(name, stype)
-                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(fp, i+1)))
-                        # For sets, check if data is loaded from CSV
-                        if stype == 'set':
-                            # Look for $ondelim $include .csv after this decl
-                            k = i
-                            ondelim_found2 = False
-                            while k < len(lines):
-                                k += 1
-                                l3 = lines[k].strip().lower() if k < len(lines) else ''
-                                if l3 == '$offdelim':
+                        break
+                    if DECL_START_RE.match(l2) or INCLUDE_RE.match(l2) or SOLVE_RE.search(l2) or MODEL_RE.search(l2):
+                        break
+                    table_lines.append(l2)
+                    j += 1
+                # Check if data is from CSV
+                if any('$ondelim' in tl.lower() for tl in table_lines) and any('$include' in tl.lower() and '.csv' in tl.lower() for tl in table_lines):
+                    for tl in table_lines:
+                        if '$include' in tl.lower():
+                            imm = INCLUDE_RE.match(tl.strip())
+                            if imm:
+                                rest = imm.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                if rest.lower().endswith('.csv'):
+                                    sym.csv_file = rest
                                     break
-                                if l3 == '$ondelim':
-                                    ondelim_found2 = True
-                                if ondelim_found2 and l3.startswith('$include'):
-                                    inc_m2 = INCLUDE_RE.match(lines[k])
-                                    if inc_m2:
-                                        rest2 = inc_m2.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
-                                        if rest2.lower().endswith('.csv'):
-                                            csv_path = rest2
-                                            csv_found = True
-                            if csv_found:
-                                sym.csv_file = csv_path
-                # For parameters and scalars, skip over data definitions bounded by / ... /
-                if stype in ['parameter', 'scalar']:
-                    j = i + 1
-                    in_data = False
-                    while j < len(lines):
-                        l2 = lines[j].rstrip('\n').strip()
-                        if l2.startswith('/'):
-                            in_data = True
-                        if in_data and l2.endswith('/'):
-                            i = j
+                # Parse only small tables line by line; for large tables, skip to avoid performance issues
+                if len(table_lines) > 100:
+                    values = {}
+                    skipped = True
+                else:
+                    values = {}
+                    skipped = False
+                    # Parse a simple table: header row with column keys, then rows as key + numbers
+                    # This is heuristic and works for common rectangular numeric tables.
+                    header_cols: List[str] = []
+                    values = {}
+                    # Find first non-empty line as header
+                    for idx, tl in enumerate(table_lines):
+                        if tl.strip() and not tl.strip().endswith(':') and not tl.strip() == ';':
+                            header_line = tl
+                            header_cols = [c.strip() for c in re.split(r"\s+", header_line.strip()) if c.strip()]
+                            start_row = i + 1 + idx + 1
                             break
-                        if DECL_START_RE.match(lines[j]):
-                            break
-                        j += 1
-                i += 1
+                    else:
+                        header_cols = []
+                        start_row = i + 1
+                    # Parse rows
+                    r = start_row
+                    while r < i + 1 + len(table_lines):
+                        row_line = entries[r].text
+                        if not row_line.strip() or row_line.strip() == ';':
+                            r += 1
+                            continue
+                        parts = [p for p in re.split(r"\s+", row_line.strip()) if p]
+                        if not parts:
+                            r += 1
+                            continue
+                        row_key = parts[0]
+                        for k, col in enumerate(header_cols[1:], start=1):
+                            if k >= len(parts):
+                                continue
+                            try:
+                                val = float(parts[k])
+                                key_tuple = (row_key, col)
+                                values[key_tuple] = val
+                            except ValueError:
+                                pass
+                        r += 1
+                defn = Definition(kind='table', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), values=values, skipped=skipped)
+                sym.defs.append(defn)
+                i = j
                 continue
-
-            # Check for multi-line model start
-            if re.match(r'^\s*model\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
-                accumulated = line
+            # Other declarations (Sets, Parameters, Scalars, Equations)
+            # We record the line; detailed parsing of dimensions is skipped.
+            first_word = line.strip().split()[0].lower()
+            stype_map = {
+                'set': 'set', 'sets': 'set',
+                'parameter': 'parameter', 'parameters': 'parameter',
+                'scalar': 'scalar', 'scalars': 'scalar',
+                'equation': 'equation', 'equations': 'equation',
+                'variables': 'variable'
+            }
+            stype = stype_map.get(first_word, 'unknown')
+            # Extract names (split by commas until ';')
+            decl_body = line
+            decl_parts = decl_body.split(None, 1)
+            if len(decl_parts) > 1:
+                names = [n.strip() for n in re.split(r",", decl_parts[1])]
+            else:
+                names = []
+            ondelim_found = False
+            csv_found = False
+            csv_path = None
+            for raw in names:
+                # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
+                m = IDENT_RE.search(raw)
+                if m:
+                    name = m.group(1)
+                    sym = ensure_symbol(name, stype)
+                    sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                    # For sets, check if data is loaded from CSV
+                    if stype == 'set':
+                        # Look for $ondelim $include .csv after this decl
+                        k = i
+                        ondelim_found2 = False
+                        while k < len(entries):
+                            k += 1
+                            l3 = entries[k].text.strip().lower() if k < len(entries) else ''
+                            if l3 == '$offdelim':
+                                break
+                            if l3 == '$ondelim':
+                                ondelim_found2 = True
+                            if ondelim_found2 and l3.startswith('$include'):
+                                inc_m2 = INCLUDE_RE.match(l3)
+                                if inc_m2:
+                                    rest2 = inc_m2.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                    if rest2.lower().endswith('.csv'):
+                                        csv_path = rest2
+                                        csv_found = True
+                        if csv_found:
+                            sym.csv_file = csv_path
+            # For parameters and scalars, skip over data definitions bounded by / ... /
+            if stype in ['parameter', 'scalar']:
                 j = i + 1
-                while j < len(lines):
-                    next_line = lines[j].rstrip('\n')
-                    if not next_line.strip():
-                        j += 1
-                        continue
-                    accumulated += ' ' + next_line.strip()
-                    if next_line.strip().endswith(';'):
-                        # Parse the full model
-                        model_match = MODEL_RE.search(accumulated)
-                        if model_match:
-                            mname = model_match.group(1)
-                            eqs = [e.strip() for e in model_match.group(2).split(',') if e.strip()]
-                            models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(fp, i+1)))
+                in_data = False
+                while j < len(entries):
+                    l2 = entries[j].text.strip()
+                    if l2.startswith('/'):
+                        in_data = True
+                    if in_data and l2.endswith('/'):
                         i = j
                         break
-                    j += 1
-                i += 1
-                continue
-
-            # Model membership (single line)
-            mm = MODEL_RE.search(line)
-            if mm:
-                mname = mm.group(1)
-                eqs = [e.strip() for e in mm.group(2).split(',') if e.strip()]
-                models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(fp, i+1)))
-                i += 1
-                continue
-
-            # Solve detection
-            sm = SOLVE_RE.search(line)
-            if sm:
-                objvar = sm.group(3).strip()
-                solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=objvar, loc=SourceLoc(fp, i+1)))
-                ensure_symbol(objvar, 'variable')
-                i += 1
-                continue
-
-            # Check for multi-line equation start (has .. but no ; at end)
-            eq_start_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.*)$", re.IGNORECASE)
-            em_start = eq_start_re.match(line)
-            if em_start and not line.strip().endswith(';'):
-                # Accumulate multi-line equation
-                ename = em_start.group(1)
-                accumulated = line
-                j = i + 1
-                while j < len(lines):
-                    next_line = lines[j].rstrip('\n')
-                    if not next_line.strip():
-                        j += 1
-                        continue
-                    accumulated += ' ' + next_line.strip()
-                    if next_line.strip().endswith(';'):
-                        # Found the end, parse the full equation
-                        em = EQUATION_RE.match(accumulated)
-                        if em:
-                            lhs, sense, rhs = em.groups()[1:4]  # Skip ename
-                            sym = ensure_symbol(ename, 'equation')
-                            deps = find_idents(lhs) | find_idents(rhs)
-                            sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(fp, i+1), deps=deps, lhs=lhs.strip()))
-                        i = j
+                    if DECL_START_RE.match(entries[j].text):
                         break
                     j += 1
-                i += 1
-                continue
-
-            # Equation definitions (single line)
-            em = EQUATION_RE.match(line)
-            if em:
-                ename, lhs, sense, rhs = em.groups()
-                sym = ensure_symbol(ename, 'equation')
-                deps = find_idents(lhs) | find_idents(rhs)
-                sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(fp, i+1), deps=deps, lhs=lhs.strip()))
-                i += 1
-                continue
-
-            # Check for multi-line assignment start
-            am_start_re = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?", re.IGNORECASE)
-            am_start = am_start_re.match(line)
-            if am_start and not line.strip().endswith(';'):
-                atgt = am_start.group(1)
-                accumulated = line
-                j = i + 1
-                while j < len(lines):
-                    next_line = lines[j].rstrip('\n')
-                    if not next_line.strip():
-                        j += 1
-                        continue
-                    accumulated += ' ' + next_line.strip()
-                    if next_line.strip().endswith(';'):
-                        # Check if it's an assignment by having =
-                        if '=' in accumulated:
-                            eq_pos = accumulated.find('=')
-                            expr = accumulated[eq_pos+1:].strip().rstrip(';')
-                            deps = find_idents(expr)
-                            sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
-                            sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(fp, i+1), deps=deps, lhs=atgt.strip()))
-                        i = j
-                        break
-                    j += 1
-                i += 1
-                continue
-
-            # Assignments (parameters/scalars/etc.)
-            am = ASSIGN_RE.match(line)
-            if am:
-                tgt = am.group(1)
-                expr = am.group(3)
-                deps = find_idents(expr)
-                sym = ensure_symbol(tgt, symbols.get(tgt.lower(), SymbolInfo(original=tgt, stype='unknown')).stype or 'unknown')
-                sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(fp, i+1), deps=deps, lhs=tgt.strip()))
-                i += 1
-                continue
-
             i += 1
+            continue
+
+        # Check for multi-line model start
+        if re.match(r'^\s*model\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += ' ' + next_line.strip()
+                if next_line.strip().endswith(';'):
+                    # Parse the full model
+                    model_match = MODEL_RE.search(accumulated)
+                    if model_match:
+                        mname = model_match.group(1)
+                        eqs = [e.strip() for e in model_match.group(2).split(',') if e.strip()]
+                        models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
+        # Model membership (single line)
+        mm = MODEL_RE.search(line)
+        if mm:
+            mname = mm.group(1)
+            eqs = [e.strip() for e in mm.group(2).split(',') if e.strip()]
+            models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
+            i += 1
+            continue
+
+        # Solve detection
+        sm = SOLVE_RE.search(line)
+        if sm:
+            objvar = sm.group(3).strip()
+            solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=objvar, loc=SourceLoc(entries[i].file, entries[i].line)))
+            ensure_symbol(objvar, 'variable')
+            i += 1
+            continue
+
+        # Check for multi-line equation start (has .. but no ; at end)
+        eq_start_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.*)$", re.IGNORECASE)
+        em_start = eq_start_re.match(line)
+        if em_start and not line.strip().endswith(';'):
+            # Accumulate multi-line equation
+            ename = em_start.group(1)
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += ' ' + next_line.strip()
+                if next_line.strip().endswith(';'):
+                    # Found the end, parse the full equation
+                    em = EQUATION_RE.match(accumulated)
+                    if em:
+                        lhs, sense, rhs = em.groups()[1:4]  # Skip ename
+                        sym = ensure_symbol(ename, 'equation')
+                        deps = find_idents(lhs) | find_idents(rhs)
+                        sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
+        # Equation definitions (single line)
+        em = EQUATION_RE.match(line)
+        if em:
+            ename, lhs, sense, rhs = em.groups()
+            sym = ensure_symbol(ename, 'equation')
+            deps = find_idents(lhs) | find_idents(rhs)
+            sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+            i += 1
+            continue
+
+        # Check for multi-line assignment start
+        am_start_re = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?", re.IGNORECASE)
+        am_start = am_start_re.match(line)
+        if am_start and not line.strip().endswith(';'):
+            atgt = am_start.group(1)
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += ' ' + next_line.strip()
+                if next_line.strip().endswith(';'):
+                    # Check if it's an assignment by having =
+                    if '=' in accumulated:
+                        eq_pos = accumulated.find('=')
+                        expr = accumulated[eq_pos+1:].strip().rstrip(';')
+                        deps = find_idents(expr)
+                        sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
+                        sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=atgt.strip()))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
+        # Assignments (parameters/scalars/etc.)
+        am = ASSIGN_RE.match(line)
+        if am:
+            tgt = am.group(1)
+            expr = am.group(3)
+            deps = find_idents(expr)
+            sym = ensure_symbol(tgt, symbols.get(tgt.lower(), SymbolInfo(original=tgt, stype='unknown')).stype or 'unknown')
+            sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=tgt.strip()))
+            i += 1
+            continue
+
+        i += 1
 
     return symbols, models, solves
 
