@@ -217,6 +217,9 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
     current_gdx_file = None
     i = 0
     while i < len(entries):
+        if i % 1000 == 0 or i == 0:
+            status_msg = f"Parsing merged code ({len(entries)} lines): {i}/{len(entries)}"
+            print(f"\r{status_msg}", end="", flush=True)
         line = entries[i].text
         if not line.strip():
             i += 1
