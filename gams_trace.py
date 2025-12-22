@@ -190,9 +190,17 @@ def load_gms(root_path: str) -> List[LineEntry]:
                 else:
                     if not equation_accumulating:
                         if '..' in line:
+                            # Check if previous merged entry is potential equation name (starts with word, no ;)
+                            if (merged_lines and
+                                re.match(r'^\s*[A-Za-z_]', merged_lines[-1].text) and
+                                ';' not in merged_lines[-1].text):
+                                name_entry = merged_lines.pop()
+                                equation_buff = [name_entry.text, line]
+                                equation_line_num = name_entry.line
+                            else:
+                                equation_buff = [line]
+                                equation_line_num = line_num
                             equation_accumulating = True
-                            equation_buff.append(line)
-                            equation_line_num = line_num
                         else:
                             merged_lines.append(LineEntry(text=line, file=full, line=line_num))
                     else:
@@ -540,10 +548,13 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     # Found the end, parse the full equation
                     em = EQUATION_RE.match(accumulated)
                     if em:
-                        lhs, sense, rhs = em.groups()[2:5]  # Skip ename, condition
-                        sym = ensure_symbol(ename, 'equation')
-                        deps = find_idents(lhs) | find_idents(rhs)
-                        sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+                        m = IDENT_RE.search(ename)
+                        if m:
+                            ename_ident = m.group(1)
+                            lhs, sense, rhs = em.groups()[2:5]  # Skip ename, condition
+                            sym = ensure_symbol(ename_ident, 'equation')
+                            deps = find_idents(lhs) | find_idents(rhs)
+                            sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
                     i = j
                     break
                 j += 1
@@ -558,9 +569,12 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             lhs = groups[2]
             sense = groups[3]
             rhs = groups[4]
-            sym = ensure_symbol(ename, 'equation')
-            deps = find_idents(lhs) | find_idents(rhs)
-            sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+            m = IDENT_RE.search(ename)
+            if m:
+                ename_ident = m.group(1)
+                sym = ensure_symbol(ename_ident, 'equation')
+                deps = find_idents(lhs) | find_idents(rhs)
+                sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
             i += 1
             continue
 
