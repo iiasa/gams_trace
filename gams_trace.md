@@ -1,7 +1,7 @@
 The `gams_trace.py` script:
 
 *   Recursively loads your GAMS sources and resolves `$include` / `$batinclude`
-*   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables`, `Equations`, `Model`
+*   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables` (including multi-line declarations where variable lists may be comma-separated across lines), `Equations`, `Model`
 *   Detects your `solve ... using lp minimizing|maximizing ...`
 *   Builds a **dependency graph** of symbols referenced by assignments/equations
 *   Lets you query and **trace** the origin of numbers (e.g., parameters feeding the objective or a constraint’s RHS)

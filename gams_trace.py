@@ -9,69 +9,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-import lark
-
-# GAMS Grammar using Lark
-GAMS_GRAMMAR = r"""
-%import common.WS
-%ignore WS
-
-start: (statement ";")*
-
-statement: include_stmt
-         | gdxin_stmt
-         | load_stmt
-         | loaddc_stmt
-         | model_stmt
-         | solve_stmt
-         | declaration
-         | table_declaration
-         | assignment
-         | equation
-
-include_stmt: DOLLAR ("bat")? "include" path
-path: STRING | WORD
-
-gdxin_stmt: DOLLAR "gdxin" path
-
-load_stmt: DOLLAR "load" symbol_list
-loaddc_stmt: DOLLAR "loaddc" symbol_list
-
-symbol_list: WORD ("," WORD)*
-STRING: /"[^"]*"/ | /'[^']*'/
-
-declaration: ("set"|"sets"|"parameter"|"parameters"|"scalar"|"scalars"|"equation"|"equations"|"variable"|"variables") name_list
-
-name_list: name ("," name)*
-name: WORD dims?
-dims: "(" dim ("," dim)* ")"
-dim: WORD
-
-table_declaration: "table" name dims?
-
-model_stmt: "model" WORD "/" eq_list "/"
-eq_list: WORD ("," WORD)*
-
-solve_stmt: "solve" WORD "using" "lp" ("minimizing" | "maximizing") WORD
-
-assignment: name "=" expression
-
-equation: WORD ".." expression ("=l=" | "=e=" | "=g=") expression
-
-expression: term (( "+" | "-" | "*" | "/" ) term)*
-term: primary | "(" expression ")" | function
-primary: NUMBER | WORD
-function: WORD "(" arg_list ")"
-arg_list: | expression ("," expression)*
-
-DOLLAR: "$"
-NUMBER: /\d+(\.\d+)?/
-WORD: /[A-Za-z_]\w*/
-"""
-
-# Compile grammar
-parser = lark.Lark(GAMS_GRAMMAR, propagate_positions=True)
-
 class IncludeError(Exception):
     def __init__(self, message: str, include_file: str, include_loc: Optional[Tuple[str, int, str]]):
         self.include_file = include_file
@@ -259,23 +196,6 @@ def load_gms(root_path: str) -> List[LineEntry]:
 # Parser
 # ----------------------------
 
-def extract_idents(tree_node) -> Set[str]:
-    """Extract identifiers from a Lark tree node (for expressions)."""
-    ids = set()
-    if isinstance(tree_node, lark.Tree):
-        if tree_node.data == 'WORD':
-            word = tree_node.children[0].value.lower()
-            if word not in BUILTINS and not word.isnumeric():
-                ids.add(word)
-        else:
-            for child in tree_node.children:
-                ids.update(extract_idents(child))
-    elif isinstance(tree_node, lark.Token) and tree_node.type == 'WORD':
-        word = tree_node.value.lower()
-        if word not in BUILTINS and not word.isnumeric():
-            ids.add(word)
-    return ids
-
 def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo]]:
     symbols: Dict[str, SymbolInfo] = {}
     models: List[ModelInfo] = []
@@ -287,6 +207,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         if name_lower not in symbols:
             symbols[name_lower] = SymbolInfo(original=original, stype=stype)
         else:
+            # upgrade stype if unknown
             if symbols[name_lower].stype == "unknown":
                 symbols[name_lower].stype = stype
         return symbols[name_lower]
@@ -302,87 +223,135 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             continue
         # Merge continuation lines if trailing comma and next line
         # (simple heuristic)
-        full_line = line
-        j = i + 1
-        while j < len(entries) and entries[j].text.lstrip().startswith(','):
-            full_line += ' ' + entries[j].text.strip()
-            j += 1
+        if i + 1 < len(entries) and entries[i+1].text.lstrip().startswith(','):
+            line += ' ' + entries[i+1].text.strip()
+            i += 1
 
-        try:
-            # Try to parse the statement
-            tree = parser.parse(f"{full_line};")
-            # Assume first child is the statement
-            stmt = tree.children[0]
-            data = stmt.data
+        # GDX input detection
+        gm = GDXIN_RE.match(line)
+        if gm:
+            current_gdx_file = gm.group(1).strip().strip('"\'')
+            i += 1
+            continue
 
-            if data == 'include_stmt':
-                # Handle include (but already handled in load_gms)
-                pass
-            elif data == 'gdxin_stmt':
-                path = stmt.children[1]  # WORD or STRING
-                current_gdx_file = path.value.strip('"\'')
-            elif data in ('load_stmt', 'loaddc_stmt'):
-                syms = stmt.children[1:]  # symbol_list
-                for sym_tok in syms:
-                    if isinstance(sym_tok, lark.Token):  # WORD
-                        sym_name = sym_tok.value
-                        sym = ensure_symbol(sym_name, 'unknown')
-                        sym.defs.append(Definition(kind='gdx_load', text=full_line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
-            elif data == 'declaration':
-                stype = stmt.children[0].data  # 'set', 'parameter', etc.
-                stype_map = {'set': 'set', 'parameter': 'parameter', 'scalar': 'scalar', 'equation': 'equation', 'variable': 'variable'}
-                stype_str = stype_map.get(stype, 'unknown')
-                # name_list
-                names = []
-                for node in stmt.children[1:]:
-                    if node.data == 'name':
-                        name_tok = node.children[0]  # WORD
-                        names.append(name_tok.value)
-                for name in names:
-                    sym = ensure_symbol(name, stype_str)
-                    sym.decls.append(Definition(kind='declaration', text=full_line, loc=SourceLoc(entries[i].file, entries[i].line)))
-            elif data == 'table_declaration':
-                tname = stmt.children[1].children[0].value  # name -> WORD
-                dims = []
-                if len(stmt.children) > 2:
-                    dims_node = stmt.children[2]
-                    for dim in dims_node.children:
-                        if isinstance(dim, lark.Tree) and dim.data == 'dim':
-                            dims.append(dim.children[0].value)
+        # Load detection
+        lm = LOAD_RE.match(line) or LOADDC_RE.match(line)
+        if lm:
+            symbols_list = [s.strip() for s in lm.group(1).strip().split(',') if s.strip()]
+            for sym_name in symbols_list:
+                sym = ensure_symbol(sym_name, 'unknown')
+                sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
+            i += 1
+            continue
+
+        # Declarations
+        if DECL_START_RE.match(line):
+            # Variables special case
+            vdm = VAR_DECL_RE.match(line)
+            if vdm and vdm.group(2).strip():
+                var_list = vdm.group(2)
+                for v in re.split(r",", var_list):
+                    vname = v.strip()
+                    if not vname:
+                        continue
+                    sym = ensure_symbol(vname, 'variable')
+                    sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                i += 1
+                continue
+            # Check for multi-line variable declaration
+            if 'variables' in line.lower() and not line.strip().endswith(';'):
+                accumulated = line
+                j = i + 1
+                while j < len(entries):
+                    next_line = entries[j].text
+                    if not next_line.strip():
+                        j += 1
+                        continue
+                    accumulated += '\n' + next_line.rstrip('\n')
+                    if next_line.strip().endswith(';'):
+                        # Parse the full variable declaration, handling comma-separated variables across multiple lines
+                        var_match = MULTI_VAR_DECL_RE.search(accumulated)
+                        if var_match and var_match.group(2):
+                            # Normalize by replacing newlines with spaces and split on commas
+                            vars_str = var_match.group(2).replace('\n', ' ')
+                            var_list = re.split(r',', vars_str)
+                            for v in var_list:
+                                vname = v.strip()
+                                if vname and not vname.startswith('*'):
+                                    m = IDENT_RE.search(vname)
+                                    if m:
+                                        name = m.group(1)
+                                        sym = ensure_symbol(name, 'variable')
+                                        sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        i = j
+                        break
+                    j += 1
+                i += 1
+                continue
+            # Tables block
+            th = TABLE_HEAD_RE.match(line)
+            if th:
+                tname = th.group(1)
+                dims = [d.strip() for d in th.group(2).split(',')]
                 sym = ensure_symbol(tname, 'table')
                 sym.dims = dims
-                # Table data not parsed via grammar, keep as is
-                # Parse subsequent lines for table data
+                # Read subsequent lines until a lone ';' or next declaration
+                j = i + 1
                 table_lines: List[str] = []
-                k = j
-                while k < len(entries):
-                    l2 = entries[k].text
+                while j < len(entries):
+                    l2 = entries[j].text
                     if not l2.strip():
-                        k += 1
+                        j += 1
                         continue
                     if l2.strip() == ';':
                         table_lines.append(l2)
-                        k += 1
+                        j += 1
+                        break
+                    if DECL_START_RE.match(l2) or INCLUDE_RE.match(l2) or SOLVE_RE.search(l2) or MODEL_RE.search(l2):
                         break
                     table_lines.append(l2)
-                    k += 1
-                # Same table parsing logic
+                    j += 1
+                # Check if data is from CSV
+                if any('$ondelim' in tl.lower() for tl in table_lines) and any('$include' in tl.lower() and '.csv' in tl.lower() for tl in table_lines):
+                    for tl in table_lines:
+                        if '$include' in tl.lower():
+                            imm = INCLUDE_RE.match(tl.strip())
+                            if imm:
+                                rest = imm.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                if rest.lower().endswith('.csv'):
+                                    sym.csv_file = rest
+                                    break
+                # Parse only small tables line by line; for large tables, skip to avoid performance issues
                 if len(table_lines) > 100:
-                    values = {}
+                    values: Dict[Tuple[str, ...], float] = {}
                     skipped = True
                 else:
                     values = {}
                     skipped = False
-                    header_cols = []
-                    for tl in table_lines:
+                    # Parse a simple table: header row with column keys, then rows as key + numbers
+                    # This is heuristic and works for common rectangular numeric tables.
+                    header_cols: List[str] = []
+                    values = {}
+                    # Find first non-empty line as header
+                    for idx, tl in enumerate(table_lines):
                         if tl.strip() and not tl.strip().endswith(':') and not tl.strip() == ';':
-                            header_cols = tl.strip().split()
+                            header_line = tl
+                            header_cols = [c.strip() for c in re.split(r"\s+", header_line.strip()) if c.strip()]
+                            start_row = i + 1 + idx + 1
                             break
-                    for tl in table_lines:
-                        if not tl.strip() or tl.strip() == ';':
+                    else:
+                        header_cols = []
+                        start_row = i + 1
+                    # Parse rows
+                    r = start_row
+                    while r < i + 1 + len(table_lines):
+                        row_line = entries[r].text
+                        if not row_line.strip() or row_line.strip() == ';':
+                            r += 1
                             continue
-                        parts = tl.strip().split()
-                        if not parts or not header_cols:
+                        parts = [p for p in re.split(r"\s+", row_line.strip()) if p]
+                        if not parts:
+                            r += 1
                             continue
                         row_key = parts[0]
                         for k, col in enumerate(header_cols[1:], start=1):
@@ -394,52 +363,195 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                                 values[key_tuple] = val
                             except ValueError:
                                 pass
-                defn = Definition(kind='table', text=full_line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), values=values, skipped=skipped)
+                        r += 1
+                defn = Definition(kind='table', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), values=values, skipped=skipped)
                 sym.defs.append(defn)
-                i = k
+                i = j
                 continue
-            elif data == 'model_stmt':
-                mname = stmt.children[1].value  # WORD after 'model'
-                eqs = []
-                if len(stmt.children) > 3:
-                    eq_list = stmt.children[3:]  # eq_list
-                    for eq in eq_list:
-                        if isinstance(eq, lark.Token):
-                            eqs.append(eq.value)
-                        elif hasattr(eq, 'value'):
-                            eqs.append(eq.value)
-                models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
-            elif data == 'solve_stmt':
-                mmodel = stmt.children[1].value
-                sense = stmt.children[3].data  # 'minimizing' or 'maximizing'
-                objvar = stmt.children[5].value
-                solves.append(SolveInfo(model=mmodel, sense=sense, objvar=objvar, loc=SourceLoc(entries[i].file, entries[i].line)))
-                ensure_symbol(objvar, 'variable')
-            elif data == 'assignment':
-                tgt = stmt.children[0]  # name
-                tgt_name = tgt.children[0].value if isinstance(tgt, lark.Tree) else tgt.value
-                expr = stmt.children[2]  # expression
-                deps = extract_idents(expr)
-                sym = ensure_symbol(tgt_name, symbols.get(tgt_name.lower(), SymbolInfo(original=tgt_name, stype='unknown')).stype or 'unknown')
-                sym.defs.append(Definition(kind='assignment', text=full_line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=tgt_name))
-            elif data == 'equation':
-                ename = stmt.children[0].value
-                lhs_expr = stmt.children[2]
-                rhs_expr = stmt.children[4]
-                deps = extract_idents(lhs_expr) | extract_idents(rhs_expr)
-                sym = ensure_symbol(ename, 'equation')
-                sym.defs.append(Definition(kind='equation', text=full_line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=''))
-
-            # Advance i to j for multi-line handling
-            i = j
-        except lark.exceptions.LarkError:
-            # Fallback: if Lark fails, try to match with regex for important cases like multi-line
-            # For now, advance one line
+            # Other declarations (Sets, Parameters, Scalars, Equations)
+            # We record the line; detailed parsing of dimensions is skipped.
+            first_word = line.strip().split()[0].lower()
+            stype_map = {
+                'set': 'set', 'sets': 'set',
+                'parameter': 'parameter', 'parameters': 'parameter',
+                'scalar': 'scalar', 'scalars': 'scalar',
+                'equation': 'equation', 'equations': 'equation',
+                'variables': 'variable'
+            }
+            stype = stype_map.get(first_word, 'unknown')
+            # Extract names (split by commas until ';')
+            decl_body = line
+            decl_parts = decl_body.split(None, 1)
+            if len(decl_parts) > 1:
+                names = [n.strip() for n in re.split(r",", decl_parts[1])]
+            else:
+                names = []
+            ondelim_found = False
+            csv_found = False
+            csv_path = None
+            for raw in names:
+                # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
+                m = IDENT_RE.search(raw)
+                if m:
+                    name = m.group(1)
+                    sym = ensure_symbol(name, stype)
+                    sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                    # For sets, check if data is loaded from CSV
+                    if stype == 'set':
+                        # Look for $ondelim $include .csv after this decl
+                        k = i
+                        ondelim_found2 = False
+                        while k < len(entries):
+                            k += 1
+                            l3 = entries[k].text.strip().lower() if k < len(entries) else ''
+                            if l3 == '$offdelim':
+                                break
+                            if l3 == '$ondelim':
+                                ondelim_found2 = True
+                            if ondelim_found2 and l3.startswith('$include'):
+                                inc_m2 = INCLUDE_RE.match(l3)
+                                if inc_m2:
+                                    rest2 = inc_m2.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                    if rest2.lower().endswith('.csv'):
+                                        csv_path = rest2
+                                        csv_found = True
+                        if csv_found:
+                            sym.csv_file = csv_path
+            # For parameters and scalars, skip over data definitions bounded by / ... /
+            if stype in ['parameter', 'scalar']:
+                j = i + 1
+                in_data = False
+                while j < len(entries):
+                    l2 = entries[j].text.strip()
+                    if l2.startswith('/'):
+                        in_data = True
+                    if in_data and l2.endswith('/'):
+                        i = j
+                        break
+                    if DECL_START_RE.match(entries[j].text):
+                        break
+                    j += 1
             i += 1
+            continue
 
-        # Handle multi-line not parsed by simple statement
-        # Keep some regex for complex cases like multi-line declarations, but simplify
-        # Time constraints, keep original for unparsed lines
+        # Check for multi-line model start
+        if re.match(r'^\s*model\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += ' ' + next_line.strip()
+                if next_line.strip().endswith(';'):
+                    # Parse the full model
+                    model_match = MODEL_RE.search(accumulated)
+                    if model_match:
+                        mname = model_match.group(1)
+                        eqs = [e.strip() for e in model_match.group(2).split(',') if e.strip()]
+                        models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
+        # Model membership (single line)
+        mm = MODEL_RE.search(line)
+        if mm:
+            mname = mm.group(1)
+            eqs = [e.strip() for e in mm.group(2).split(',') if e.strip()]
+            models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
+            i += 1
+            continue
+
+        # Solve detection
+        sm = SOLVE_RE.search(line)
+        if sm:
+            objvar = sm.group(3).strip()
+            solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=objvar, loc=SourceLoc(entries[i].file, entries[i].line)))
+            ensure_symbol(objvar, 'variable')
+            i += 1
+            continue
+
+        # Check for multi-line equation start (has .. but no ; at end)
+        eq_start_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.*)$", re.IGNORECASE)
+        em_start = eq_start_re.match(line)
+        if em_start and not line.strip().endswith(';'):
+            # Accumulate multi-line equation
+            ename = em_start.group(1)
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += ' ' + next_line.strip()
+                if next_line.strip().endswith(';'):
+                    # Found the end, parse the full equation
+                    em = EQUATION_RE.match(accumulated)
+                    if em:
+                        lhs, sense, rhs = em.groups()[1:4]  # Skip ename
+                        sym = ensure_symbol(ename, 'equation')
+                        deps = find_idents(lhs) | find_idents(rhs)
+                        sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
+        # Equation definitions (single line)
+        em = EQUATION_RE.match(line)
+        if em:
+            ename, lhs, sense, rhs = em.groups()
+            sym = ensure_symbol(ename, 'equation')
+            deps = find_idents(lhs) | find_idents(rhs)
+            sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+            i += 1
+            continue
+
+        # Check for multi-line assignment start
+        am_start_re = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?", re.IGNORECASE)
+        am_start = am_start_re.match(line)
+        if am_start and not line.strip().endswith(';'):
+            atgt = am_start.group(1)
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += ' ' + next_line.strip()
+                if next_line.strip().endswith(';'):
+                    # Check if it's an assignment by having =
+                    if '=' in accumulated:
+                        eq_pos = accumulated.find('=')
+                        expr = accumulated[eq_pos+1:].strip().rstrip(';')
+                        deps = find_idents(expr)
+                        sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
+                        sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=atgt.strip()))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
+        # Assignments (parameters/scalars/etc.)
+        am = ASSIGN_RE.match(line)
+        if am:
+            tgt = am.group(1)
+            expr = am.group(3)
+            deps = find_idents(expr)
+            sym = ensure_symbol(tgt, symbols.get(tgt.lower(), SymbolInfo(original=tgt, stype='unknown')).stype or 'unknown')
+            sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=tgt.strip()))
+            i += 1
+            continue
+
+        i += 1
 
     return symbols, models, solves
 
