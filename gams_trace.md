@@ -91,12 +91,14 @@ python gams_trace.py list scalars
 python gams_trace.py list tables
 python gams_trace.py list variables
 python gams_trace.py list equations
+python gams_trace.py list unknowns
 python gams_trace.py list set MY_SET
 python gams_trace.py list parameter MY_PARAM
 python gams_trace.py list scalar MY_SCALAR
 python gams_trace.py list table MY_TABLE
 python gams_trace.py list variable MY_VAR
 python gams_trace.py list equation MY_EQ
+python gams_trace.py list unknown MY_UNKNOWN
 ```
 
 Typical outputs for listing:
@@ -127,6 +129,9 @@ Typical outputs for listing:
 
 *   `list equations`:
     Lists all defined equations (e.g., - Balance_eq).
+
+*   `list unknowns`:
+    Lists all symbols encountered that could not be classified or linked to declarations (e.g., - Unclassified_symbol).
 
 *   `list set MY_SET`:
     Shows the definition location and first ≤5 lines of the set declaration.

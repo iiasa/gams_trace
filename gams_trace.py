@@ -726,10 +726,11 @@ def main():
     solve_sub.add_argument('solve_number', type=int, help='Solve number (1+)')
 
     # Symbol type commands: plural for list names, singular for definition
-    for typ in ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations']:
+    for typ in ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']:
         list_subs.add_parser(typ, help=f'List all {typ}')
-        singular = list_subs.add_parser(typ[:-1], help=f'Show definition of a {typ[:-1]}')
-        singular.add_argument('symbol_name', help=f'Name of the {typ[:-1]}')
+        singular_stype = typ[:-1]
+        singular = list_subs.add_parser(singular_stype, help=f'Show definition of a {singular_stype}')
+        singular.add_argument('symbol_name', help=f'Name of the {singular_stype}')
 
     # trace subcommand
     trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations')
@@ -838,8 +839,8 @@ def main():
                 print()
             else:
                 # Handle symbol type lists
-                plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations']
-                singular_types = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation']
+                plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
+                singular_types = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknown']
                 if args.list_command in plural_types:
                     stype = args.list_command[:-1]  # Remove 's' to get singular stype
                     if stype == 'variable':
