@@ -49,6 +49,7 @@ class SymbolInfo:
     defs: List[Definition] = field(default_factory=list)
     dims: List[str] = field(default_factory=list)
     csv_file: Optional[str] = None  # for sets/tables loaded from CSV via $ondelim
+    vtype: Optional[str] = None  # Variable type: POSITIVE, FREE, BINARY, etc. (for variables only)
 
 @dataclass
 class ModelInfo:
@@ -85,8 +86,8 @@ SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE | re.DOTALL)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
 EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
-VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s+(.+);", re.IGNORECASE)
-MULTI_VAR_DECL_RE = re.compile(r"^\s*(positive|free|binary|integer)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
+VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s+(.+);", re.IGNORECASE)
+MULTI_VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
 
 
@@ -251,16 +252,28 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         if DECL_START_RE.match(line):
             # Variables special case
             vdm = VAR_DECL_RE.match(line)
-            if vdm and vdm.group(2).strip():
-                var_list = vdm.group(2)
-                for v in re.split(r",", var_list):
-                    vname = v.strip()
-                    if not vname:
-                        continue
-                    sym = ensure_symbol(vname, 'variable')
-                    sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
-                i += 1
-                continue
+            if vdm and vdm.group(3).strip():
+                if '\n' in vdm.group(3):
+                    # Multi-line declaration, skip single-line parsing
+                    pass
+                else:
+                    # Single-line variable declaration
+                    var_type = vdm.group(2).upper() if vdm.group(2) else "POSITIVE"
+                    var_list = vdm.group(3)
+                    for v in re.split(r",", var_list):
+                        vname = v.strip()
+                        if not vname:
+                            continue
+                        m = IDENT_RE.search(vname)
+                        if not m:
+                            continue
+                        name = m.group(1)
+                        sym = ensure_symbol(name, 'variable')
+                        if sym.vtype is None:
+                            sym.vtype = var_type
+                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                    i += 1
+                    continue
             # Check for multi-line variable declaration
             if 'variables' in line.lower() and not line.strip().endswith(';'):
                 accumulated = line
@@ -272,20 +285,26 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                         continue
                     accumulated += '\n' + next_line.rstrip('\n')
                     if next_line.strip().endswith(';'):
-                        # Parse the full variable declaration, handling comma-separated variables across multiple lines
+                        # Parse the full variable declaration, handling variables listed on separate lines with descriptions
                         var_match = MULTI_VAR_DECL_RE.search(accumulated)
-                        if var_match and var_match.group(2):
-                            # Normalize by replacing newlines with spaces and split on commas
-                            vars_str = var_match.group(2).replace('\n', ' ')
-                            var_list = re.split(r',', vars_str)
-                            for v in var_list:
-                                vname = v.strip()
-                                if vname and not vname.startswith('*'):
-                                    m = IDENT_RE.search(vname)
-                                    if m:
-                                        name = m.group(1)
-                                        sym = ensure_symbol(name, 'variable')
-                                        sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        if var_match and var_match.group(3):
+                            var_type = var_match.group(2).upper() if var_match.group(2) else "POSITIVE"
+                            vars_part = var_match.group(3).strip()
+                            lines = vars_part.split('\n')
+                            for line_text in lines:
+                                line_text = line_text.strip()
+                                if line_text and not line_text.startswith('*'):
+                                        # Take first token as variable name
+                                    parts = line_text.split()
+                                    if parts:
+                                        vname_str = parts[0]
+                                        m = IDENT_RE.search(vname_str)
+                                        if m:
+                                            name = m.group(1)
+                                            sym = ensure_symbol(name, 'variable')
+                                            if sym.vtype is None:
+                                                sym.vtype = var_type
+                                            sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(entries[j].file, entries[j].line)))
                         i = j
                         break
                     j += 1
@@ -577,7 +596,8 @@ def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visi
     if not sym:
         out.append("  "*depth + f"✖ {name}: not declared/defined in parsed files")
         return out
-    out.append("  "*depth + f"• {sym.original} [{sym.stype}]")
+    display_type = f"{sym.stype}: {sym.vtype}" if sym.vtype and sym.stype == 'variable' else sym.stype
+    out.append("  "*depth + f"• {sym.original} [{display_type}]")
     if sym.csv_file:
         out.append("  "*depth + f"  ├─ data loaded from CSV '{sym.csv_file}'")
     if sym.defs:
@@ -759,15 +779,27 @@ def main():
                 singular_types = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation']
                 if args.list_command in plural_types:
                     stype = args.list_command[:-1]  # Remove 's' to get singular stype
-                    names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
-                    if names:
-                        print(f"{stype.title()}s:")
-                        for name in names:
-                            print(f"- {name}")
+                    if stype == 'variable':
+                        # Special handling for variables: group by type
+                        vtypes = defaultdict(list)
+                        for sym in symbols.values():
+                            if sym.stype == 'variable':
+                                vtypes[sym.vtype].append(sym.original)
+                        for vtype in sorted(vtypes):
+                            print(f"{vtype} Variables:")
+                            for name in sorted(vtypes[vtype]):
+                                print(f"- {name}")
                         print()
                     else:
-                        print(f"No {stype}s found.")
-                        print()
+                        names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
+                        if names:
+                            print(f"{stype.title()}s:")
+                            for name in names:
+                                print(f"- {name}")
+                            print()
+                        else:
+                            print(f"No {stype}s found.")
+                            print()
                 elif args.list_command in singular_types:
                     symbol_name = args.symbol_name
                     stype = args.list_command
@@ -776,7 +808,10 @@ def main():
                         # Show definition
                         if sym.defs:
                             d = sym.defs[0]  # Take first definition
-                            print(f"{stype.title()} {sym.original} defined at {d.loc.file}:{d.loc.line}")
+                            if stype == 'variable':
+                                print(f"Variable {sym.original} ({sym.vtype}) defined at {d.loc.file}:{d.loc.line}")
+                            else:
+                                print(f"{stype.title()} {sym.original} defined at {d.loc.file}:{d.loc.line}")
                             # Show first <=5 lines of text
                             lines = d.text.strip().split('\n')
                             for i in range(min(5, len(lines))):
@@ -784,7 +819,10 @@ def main():
                             if len(lines) > 5:
                                 print("(...)")
                         else:
-                            print(f"{stype.title()} {sym.original} has no parsed definitions.")
+                            if stype == 'variable':
+                                print(f"Variable {sym.original} ({sym.vtype}) has no parsed definitions.")
+                            else:
+                                print(f"{stype.title()} {sym.original} has no parsed definitions.")
                         print()
                     else:
                         print(f"No {stype} named '{symbol_name}' found.")
