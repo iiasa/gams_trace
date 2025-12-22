@@ -61,7 +61,22 @@ First, parse the GAMS model (this will save parsed data to `gams_trace.parse` an
 
 ```bash
 python gams_trace.py parse path/to/main.gms
+python gams_trace.py save path/to/merged.gms
 ```
+
+First, parse the GAMS model (saves data to `gams_trace.parse`):
+
+```bash
+python gams_trace.py parse path/to/main.gms
+```
+
+Then, save the merged and decommented source to a file:
+
+```bash
+python gams_trace.py save path/to/merged.gms
+```
+
+This saves the merged decommented source (all `$include` and `$batinclude` files inlined, comments removed) to the specified output file.
 
 ### Listing Commands
 

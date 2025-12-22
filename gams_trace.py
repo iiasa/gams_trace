@@ -671,6 +671,10 @@ def main():
     parse_sub = subparsers.add_parser('parse', help='Parse root .gms file and save parse data to gams_trace.parse; lists all solve statements')
     parse_sub.add_argument('gms_file', help='Path to root .gms file')
 
+    # save subcommand
+    save_sub = subparsers.add_parser('save', help='Save merged decommented source from last parse to specified file')
+    save_sub.add_argument('output_file', help='Path to output file (merged decommented source)')
+
     # list subcommand
     list_sub = subparsers.add_parser('list', help='List solves, models, symbols, or specific details')
     list_subs = list_sub.add_subparsers(dest='list_command')
@@ -701,7 +705,11 @@ def main():
             ap.print_help()
             sys.exit(1)
         with open('gams_trace.parse', 'rb') as f:
-            symbols, models, solves = pickle.load(f)
+            pickled_data = pickle.load(f)
+            if len(pickled_data) != 4:
+                print("Error: gams_trace.parse is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
+                sys.exit(1)
+            files, symbols, models, solves = pickled_data
         print("Parsed symbols summary:")
         stype_counts = defaultdict(int)
         for sym in symbols.values():
@@ -715,7 +723,24 @@ def main():
     models = None
     solves = None
 
-    if args.subcommand == 'parse':
+    if args.subcommand == 'save':
+        # Save merged and decommented source
+        if not os.path.exists('gams_trace.parse'):
+            print("Error: gams_trace.parse does not exist. Run 'parse <gms_file>' first.")
+            sys.exit(1)
+        with open('gams_trace.parse', 'rb') as f:
+            pickled_data = pickle.load(f)
+            if len(pickled_data) != 4:
+                print("Error: Invalid pickle format. Run 'parse <gms_file>' first to regenerate.")
+                sys.exit(1)
+            files, _, _, _ = pickled_data
+
+        with open(args.output_file, 'w') as f:
+            for entry in files:
+                f.write(entry.text + '\n')
+        print(f"Merged decommented source saved to {args.output_file}")
+
+    elif args.subcommand == 'parse':
         # Parse from root
         try:
             files = load_gms(args.gms_file)
@@ -726,8 +751,9 @@ def main():
         symbols, models, solves = parse_code(files)
 
         # Serialize
+        pickled_data = (files, symbols, models, solves)
         with open('gams_trace.parse', 'wb') as f:
-            pickle.dump((symbols, models, solves), f)
+            pickle.dump(pickled_data, f)
         print("\rParsing complete, saved parse tree to gams_trace.parse", flush=True)
 
         # Print summary
@@ -742,19 +768,17 @@ def main():
             count = stype_counts.get(stype, 0)
             print(f"{plural_stype}: {count}")
 
-        # Write detailed solves to file
-        with open('gams_trace.solves', 'w') as f:
-            f.write(f"parse: {args.gms_file}\n")
-            for idx, s in enumerate(solves, start=1):
-                f.write(f"{idx}|model={s.model}|sense={s.sense}|objvar={s.objvar}|file={s.loc.file}|line={s.loc.line}\n")
-
     else:
         # load from pickle
         if not os.path.exists('gams_trace.parse'):
             print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with 'parse <gms_file>' first.")
             sys.exit(1)
         with open('gams_trace.parse', 'rb') as f:
-            symbols, models, solves = pickle.load(f)
+            pickled_data = pickle.load(f)
+            if len(pickled_data) != 4:
+                print("Error: gams_trace.parse is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
+                sys.exit(1)
+            files, symbols, models, solves = pickled_data
         print("Parsed data loaded from gams_trace.parse")
 
         if args.subcommand == 'list':
