@@ -690,11 +690,7 @@ def main():
 
     # trace subcommand
     trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations')
-    trace_subs = trace_sub.add_subparsers(dest='trace_command')
-    obj_sub = trace_subs.add_parser('objective', help='Trace objective for solve N')
-    obj_sub.add_argument('solve_number', nargs='?', type=int, help='Solve number (1+)')
-    # For tracing a symbol, it's just 'trace <symbol>', so no subparser, positional
-    trace_sub.add_argument('target', help='Symbol or equation name to trace')
+    trace_sub.add_argument('target', nargs=argparse.REMAINDER, help='Objective or symbol/equation name to trace; for objective, optional solve number follows')
 
     args = ap.parse_args()
 
@@ -808,7 +804,8 @@ def main():
                         vtypes = defaultdict(list)
                         for sym in symbols.values():
                             if sym.stype == 'variable':
-                                vtypes[sym.vtype].append(sym.original)
+                                vtype_str = sym.vtype or "UNKNOWN"
+                                vtypes[vtype_str].append(sym.original)
                         for vtype in sorted(vtypes):
                             print(f"{vtype} Variables:")
                             for name in sorted(vtypes[vtype]):
@@ -853,8 +850,9 @@ def main():
                         print()
 
         elif args.subcommand == 'trace':
-            if args.trace_command == 'objective':
-                solve_num = getattr(args, 'solve_number', None)
+            target = args.target
+            if target and target[0].lower() == 'objective':
+                solve_num = int(target[1]) if len(target) > 1 else None
                 if solve_num is None:
                     print("Available solves:")
                     for idx, s in enumerate(solves, start=1):
@@ -892,19 +890,22 @@ def main():
                     else:
                         print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
                 print()
-
             else:
-                # trace target (symbol or equation)
-                name = args.target
-                sym = symbols.get(name.lower()) if name else None
-                if sym and sym.stype == 'equation':
-                    for ln in explain_equation(symbols, name):
-                        print(ln)
-                    print()
+                # trace symbol or equation
+                name = target[0] if target else None
+                if name:
+                    sym = symbols.get(name.lower())
+                    if sym and sym.stype == 'equation':
+                        for ln in explain_equation(symbols, name):
+                            print(ln)
+                        print()
+                    else:
+                        for ln in trace_symbol(symbols, name):
+                            print(ln)
+                        print()
                 else:
-                    for ln in trace_symbol(symbols, name):
-                        print(ln)
-                    print()
+                    print("Error: No target specified for trace.")
+                    sys.exit(1)
 
 if __name__ == '__main__':
     main()

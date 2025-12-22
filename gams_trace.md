@@ -141,22 +141,17 @@ Typical outputs for listing:
 Trace dependencies:
 
 ```bash
+python gams_trace.py trace objective
 python gams_trace.py trace objective 1
 python gams_trace.py trace eq_supply
 python gams_trace.py trace A
 ```
 
-Or omit the solve number to get an interactive prompt (for trace objective):
-
-```bash
-python gams_trace.py trace objective
-```
-
 Typical outputs for tracing:
 
 *   `trace objective`:
-    Prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
-    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines. Requires solve number or prompts.
+    Prompts for a solve number if not provided, then prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
+    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines.
 
 *   `trace <eq_name>`:
     Prints the equation definition and traces **all parameters** appearing on LHS/RHS. Works globally without solve context.
