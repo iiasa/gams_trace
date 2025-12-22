@@ -77,7 +77,7 @@ class LineEntry:
 IDENT_RE = re.compile(r"\b([A-Za-z_]\w*)\b")
 BUILTINS = {"sum","smin","smax","min","max","ord","card","power","exp","log","abs",
             "uniform","normal","floor","ceil","round","yes","no"}
-DECL_START_RE = re.compile(r"^\s*(sets?|parameters?|scalars?|tables?|variables?|equations?)\b", re.IGNORECASE)
+DECL_START_RE = re.compile(r"^\s*(sets?|parameters?|scalars?|tables?|variables?|equations?|free|positive|negative|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)\b", re.IGNORECASE)
 INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE | re.DOTALL)
 GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE | re.DOTALL)
 LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE | re.DOTALL)
@@ -294,7 +294,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             for line_text in lines:
                                 line_text = line_text.strip()
                                 if line_text and not line_text.startswith('*'):
-                                        # Take first token as variable name
+                                    # Take first token as variable name
                                     parts = line_text.split()
                                     if parts:
                                         vname_str = parts[0]
