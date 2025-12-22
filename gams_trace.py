@@ -85,7 +85,7 @@ LOADDC_RE = re.compile(r"^\s*\$loaddc\s+(.+)", re.IGNORECASE | re.DOTALL)
 SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE | re.DOTALL)
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE | re.DOTALL)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
-EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
+EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
 VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s+(.+);", re.IGNORECASE)
 MULTI_VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
@@ -143,9 +143,12 @@ def load_gms(root_path: str) -> List[LineEntry]:
             else:
                 lines.append(raw_line.rstrip('\n'))
 
-        # Process lines, handling includes inline
+        # Process lines, handling includes inline and merging equation lines
         line_num = 1
         i = 0
+        equation_accumulating = False
+        equation_buff = []
+        equation_line_num = 1  # Placeholder
         while i < len(lines):
             line = lines[i]
             if not line:  # Empty line (comment)
@@ -185,9 +188,31 @@ def load_gms(root_path: str) -> List[LineEntry]:
                                 for idx, arg in enumerate(args, 1):
                                     merged_lines[j].text = merged_lines[j].text.replace(f'%{idx}%', arg)
                 else:
-                    merged_lines.append(LineEntry(text=line, file=full, line=line_num))
+                    if not equation_accumulating:
+                        if '..' in line:
+                            equation_accumulating = True
+                            equation_buff.append(line)
+                            equation_line_num = line_num
+                        else:
+                            merged_lines.append(LineEntry(text=line, file=full, line=line_num))
+                    else:
+                        # Accumulating an equation
+                        equation_buff.append(line)
+                        if line.strip().endswith(';'):
+                            # End of equation
+                            merged_text = '\n'.join(equation_buff)
+                            merged_lines.append(LineEntry(text=merged_text, file=full, line=equation_line_num))
+                            equation_accumulating = False
+                            equation_buff = []
+                            equation_line_num = 1  # Reset
             line_num += 1
             i += 1
+            # If end of file and still accumulating, close it (though equations should end with ;)
+            if i == len(lines) and equation_accumulating:
+                merged_text = '\n'.join(equation_buff)
+                merged_lines.append(LineEntry(text=merged_text, file=full, line=equation_line_num))
+                equation_accumulating = False
+                equation_buff = []
 
     load_file(root_path, 0)
     print(f"\rLoaded {len(merged_lines)} lines from included files.{'                                    '}", flush=True)
@@ -498,7 +523,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             continue
 
         # Check for multi-line equation start (has .. but no ; at end)
-        eq_start_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.*)$", re.IGNORECASE)
+        eq_start_re = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.*)$", re.IGNORECASE)
         em_start = eq_start_re.match(line)
         if em_start and not line.strip().endswith(';'):
             # Accumulate multi-line equation
@@ -515,7 +540,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     # Found the end, parse the full equation
                     em = EQUATION_RE.match(accumulated)
                     if em:
-                        lhs, sense, rhs = em.groups()[1:4]  # Skip ename
+                        lhs, sense, rhs = em.groups()[2:5]  # Skip ename, condition
                         sym = ensure_symbol(ename, 'equation')
                         deps = find_idents(lhs) | find_idents(rhs)
                         sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
@@ -528,7 +553,11 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         # Equation definitions (single line)
         em = EQUATION_RE.match(line)
         if em:
-            ename, lhs, sense, rhs = em.groups()
+            groups = em.groups()
+            ename = groups[0]
+            lhs = groups[2]
+            sense = groups[3]
+            rhs = groups[4]
             sym = ensure_symbol(ename, 'equation')
             deps = find_idents(lhs) | find_idents(rhs)
             sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))

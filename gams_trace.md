@@ -17,7 +17,7 @@ The `gams_trace.py` script:
 *   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
 *   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values).
 *   **Assignments:** Records parameter/scalar assignments and their dependencies (e.g., `a(i) = b(i) + 0.1*c;` → `b` and `c`).
-*   **Equations:** Extracts equation definitions (`eq.. LHS =l= RHS;`) and their symbol dependencies.
+*   **Equations:** Extracts equation definitions, handling multi-line equations where the '..' and sense may span across lines, and their symbol dependencies.
 *   **Solve detection:** Finds the LP solve statement, sense (`minimizing` or `maximizing`), and objective variable.
 *   **Tracing:** Given a target symbol or equation, recursively traces dependencies down to raw sources (e.g., table entries, literals, or GDX files).
 
