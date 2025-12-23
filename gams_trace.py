@@ -520,7 +520,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             param_name = parts[0]
                             dims = []
                             if '(' in param_name:
-                                name_match = re.match(r'([A-Za-z_]\w*)\(([^)]*)\)', param_name)
+                                name_match = re.match(r'([A-Za-z_]\w*)\s*\(\s*([^)]*)\s*\)?', param_name)
                                 if name_match:
                                     param_name = name_match.group(1)
                                     dims_str = name_match.group(2).strip()
