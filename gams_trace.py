@@ -60,6 +60,7 @@ class ModelInfo:
 @dataclass
 class SolveInfo:
     model: str
+    solver: str
     sense: str  # minimizing|maximizing
     objvar: str
     loc: SourceLoc
@@ -82,7 +83,7 @@ INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE | re.DOTALL
 GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE | re.DOTALL)
 LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE | re.DOTALL)
 LOADDC_RE = re.compile(r"^\s*\$loaddc\s+(.+)", re.IGNORECASE | re.DOTALL)
-SOLVE_RE = re.compile(r"solve\s+(\w+)\s+using\s+lp\s+(minimizing|maximizing)\s+(\w+)", re.IGNORECASE | re.DOTALL)
+SOLVE_RE = re.compile(r"^\s*solve\s+(\w+)\s+using\s+(\w+)\s+(minimizing|minimising|maximizing|maximising)\s+(\w+)", re.IGNORECASE | re.DOTALL)
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE | re.DOTALL)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
 EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
@@ -229,6 +230,16 @@ def load_gms(root_path: str) -> List[LineEntry]:
 # ----------------------------
 # Parser
 # ----------------------------
+
+NON_ASSIGNABLE_KEYWORDS = frozenset({
+    'if', 'else', 'while', 'loop', 'for', 'repeat', 'solve', 'model',
+    'set', 'sets', 'parameter', 'parameters', 'scalar', 'scalars', 'table', 'tables',
+    'variable', 'variables', 'equation', 'equations', 'function',
+    'abort', 'display', 'option', 'options', 'execute', 'put', 'file', 'error', 'system', 'call',
+    'gdxin', 'gdout', 'load', 'unload', 'include', 'batinclude', 'ontext', 'offtext',
+    'free', 'positive', 'negative', 'binary', 'integer', 'semicontinuous', 'semicont',
+    'semiinteger', 'semiint', 'sos1', 'sos2'
+})
 
 def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo]]:
     symbols: Dict[str, SymbolInfo] = {}
@@ -524,8 +535,11 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         # Solve detection
         sm = SOLVE_RE.search(line)
         if sm:
-            objvar = sm.group(3).strip()
-            solves.append(SolveInfo(model=sm.group(1), sense=sm.group(2).lower(), objvar=objvar, loc=SourceLoc(entries[i].file, entries[i].line)))
+            model = sm.group(1)
+            solver = sm.group(2)
+            sense = sm.group(3).lower()
+            objvar = sm.group(4).strip()
+            solves.append(SolveInfo(model=model, solver=solver, sense=sense, objvar=objvar, loc=SourceLoc(entries[i].file, entries[i].line)))
             ensure_symbol(objvar, 'variable')
             i += 1
             continue
@@ -581,29 +595,33 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         # Check for multi-line assignment start
         am_start_re = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?", re.IGNORECASE)
         am_start = am_start_re.match(line)
-        if am_start and not line.strip().endswith(';'):
-            atgt = am_start.group(1)
-            accumulated = line
-            j = i + 1
-            while j < len(entries):
-                next_line = entries[j].text
-                if not next_line.strip():
+        if am_start:
+            atgt = am_start.group(1).strip().lower()
+            if atgt in NON_ASSIGNABLE_KEYWORDS:
+                i += 1
+                continue
+            if not line.strip().endswith(';'):
+                accumulated = line
+                j = i + 1
+                while j < len(entries):
+                    next_line = entries[j].text
+                    if not next_line.strip():
+                        j += 1
+                        continue
+                    accumulated += ' ' + next_line.strip()
+                    if next_line.strip().endswith(';'):
+                        # Check if it's an assignment by having =
+                        if '=' in accumulated:
+                            eq_pos = accumulated.find('=')
+                            expr = accumulated[eq_pos+1:].strip().rstrip(';')
+                            deps = find_idents(expr)
+                            sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
+                            sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=atgt.strip()))
+                        i = j
+                        break
                     j += 1
-                    continue
-                accumulated += ' ' + next_line.strip()
-                if next_line.strip().endswith(';'):
-                    # Check if it's an assignment by having =
-                    if '=' in accumulated:
-                        eq_pos = accumulated.find('=')
-                        expr = accumulated[eq_pos+1:].strip().rstrip(';')
-                        deps = find_idents(expr)
-                        sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
-                        sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=atgt.strip()))
-                    i = j
-                    break
-                j += 1
-            i += 1
-            continue
+                i += 1
+                continue
 
         # Assignments (parameters/scalars/etc.)
         am = ASSIGN_RE.match(line)
@@ -707,7 +725,7 @@ def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str) -> List[str]:
 # ----------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS LP model (CPLEX). Use subcommands: parse to load, list to list solves/solve, trace for tracing.")
+    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS model. Use subcommands: parse to load, list to list solves/solve, trace for tracing.")
     subparsers = ap.add_subparsers(dest='subcommand', help='Available subcommands')
 
     # parse subcommand
@@ -825,17 +843,17 @@ def main():
             if args.list_command == 'solves':
                 print("Solve statements:")
                 for idx, s in enumerate(solves, start=1):
-                    print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                    print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                 print()
             elif args.list_command == 'solve':
                 solve_num = args.solve_number
                 if solve_num < 1 or solve_num > len(solves):
                     print("Invalid solve number. Available solves:")
                     for idx, s in enumerate(solves, start=1):
-                        print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                     sys.exit(1)
                 selected_solve = solves[solve_num - 1]
-                print(f"Solve: model={selected_solve.model}, sense={selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
+                print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
                 print()
             else:
                 # Handle symbol type lists
@@ -900,7 +918,7 @@ def main():
                 if solve_num is None:
                     print("Available solves:")
                     for idx, s in enumerate(solves, start=1):
-                        print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                     while True:
                         try:
                             solve_num = int(input(f"Enter solve number (1-{len(solves)}): "))
@@ -912,12 +930,12 @@ def main():
                     if solve_num < 1 or solve_num > len(solves):
                         print("Invalid solve number. Available solves:")
                         for idx, s in enumerate(solves, start=1):
-                            print(f"{idx}. model={s.model} sense={s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                            print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                         sys.exit(1)
                 target_solve = solves[solve_num - 1]
                 s, obj_def = extract_objective(symbols, target_solve)
                 if not s:
-                    print("No LP solve detected.")
+                    print("No solve detected.")
                 else:
                     print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
                     if obj_def:
