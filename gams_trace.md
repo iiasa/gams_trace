@@ -15,7 +15,8 @@ The `gams_trace.py` script:
 *   **Includes:** Recursively resolves `$include` and `$batinclude`, inlining the included file contents at the point of inclusion (matching GAMS compilation behavior). Allows multiple inclusions of the same file. Ignores comments (* lines and $ontext/$offtext blocks) during parsing to avoid interference with code analysis. Excludes .csv files bracketed in $ondelim/$offdelim. For $batinclude, handles argument substitution (e.g., `%1%` replaced with first argument).
 *   **Line Tracking:** Maintains original source file and line number for every line in the merged code, ensuring accurate source attribution in output.
 *   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
-*   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values).
+*   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values). Captures dimensions where specified.
+*   **Sets/Parameters/Scalars:** Parses declarations and captures dimensions where specified (e.g., `set A(i,j)` records dimensions `['i', 'j']`).
 *   **Assignments:** Records parameter/scalar assignments and their dependencies (e.g., `a(i) = b(i) + 0.1*c;` → `b` and `c`).
 *   **Equations:** Extracts equation definitions, handling multi-line equations where the '..' and sense may span across lines, and their symbol dependencies.
 *   **Solve detection:** Finds solve statements, solver types, sense (`minimizing` or `maximizing`), and objective variable.

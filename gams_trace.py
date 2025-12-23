@@ -445,26 +445,29 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                 'variables': 'variable'
             }
             stype = stype_map.get(first_word, 'unknown')
-            # Extract names (split by commas until ';')
+            # Extract names; handle differently for sets (not comma-separated) vs parameters/scalars
             decl_body = line
             decl_parts = decl_body.split(None, 1)
-            if len(decl_parts) > 1:
-                names = [n.strip() for n in re.split(r",", decl_parts[1])]
-            else:
-                names = []
             ondelim_found = False
             csv_found = False
             csv_path = None
-            for raw in names:
-                # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
-                m = IDENT_RE.search(raw)
-                if m:
-                    name = m.group(1)
-                    sym = ensure_symbol(name, stype)
-                    sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
-                    # For sets, check if data is loaded from CSV
-                    if stype == 'set':
-                        # Look for $ondelim $include .csv after this decl
+            names = []
+            if stype == 'set':
+                if len(decl_parts) > 1:
+                    name_part = decl_parts[1].strip()
+                    # Match name optionally followed by (dims...)
+                    match = re.match(r'([A-Za-z_]\w*)(?:\s*\(([^)]*)\))?', name_part)
+                    if match:
+                        name = match.group(1)
+                        dims_str = match.group(2)
+                        dims = []
+                        if dims_str:
+                            dims = [d.strip() for d in dims_str.split(',') if d.strip()]
+                        sym = ensure_symbol(name, stype)
+                        sym.dims = dims
+                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        names = [name]  # for multi-line compatibility
+                        # For sets, check if data is loaded from CSV
                         k = i
                         ondelim_found2 = False
                         while k < len(entries):
@@ -477,12 +480,28 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             if ondelim_found2 and l3.startswith('$include'):
                                 inc_m2 = INCLUDE_RE.match(l3)
                                 if inc_m2:
-                                    rest2 = inc_m2.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
+                                    rest2 = inc_m2.group(2).strip().strip('"\'').replace('%X%', '/').replace('%REGION__', REGION)
                                     if rest2.lower().endswith('.csv'):
                                         csv_path = rest2
                                         csv_found = True
                         if csv_found:
                             sym.csv_file = csv_path
+                else:
+                    # malformed, skip
+                    pass
+            else:
+                # For parameters/scalars (can be comma-separated declarations)
+                if len(decl_parts) > 1:
+                    names = [n.strip() for n in re.split(r",", decl_parts[1])]
+                else:
+                    names = []
+                for raw in names:
+                    # name may include dimension suffix (e.g., A(i,j)) — take identifier prefix
+                    m = IDENT_RE.search(raw)
+                    if m:
+                        name = m.group(1)
+                        sym = ensure_symbol(name, stype)
+                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
             # For parameters, scalars, and sets, handle multi-line declarations
             if stype in ['parameter', 'scalar', 'set']:
                 if not line.strip().endswith(';'):
@@ -495,7 +514,8 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             break
                         # Parse parameter/scalar names from this line
                         stripped_l2 = entries[j].text.strip()
-                        if stripped_l2 and not stripped_l2.startswith('*') and not stripped_l2.startswith('/'):
+                        if (stripped_l2 and not stripped_l2.startswith('*') and not stripped_l2.startswith('/')
+                            and '.' not in stripped_l2 and not stripped_l2.startswith('(')):
                             parts = stripped_l2.split(None, 1)
                             param_name = parts[0]
                             dims = []
