@@ -483,8 +483,8 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                                         csv_found = True
                         if csv_found:
                             sym.csv_file = csv_path
-            # For parameters and scalars, handle multi-line declarations
-            if stype in ['parameter', 'scalar']:
+            # For parameters, scalars, and sets, handle multi-line declarations
+            if stype in ['parameter', 'scalar', 'set']:
                 if not line.strip().endswith(';'):
                     # Multi-line declaration: accumulate until ';'
                     accumulated_names = set(n.lower() for n in names)  # To avoid duplicates
