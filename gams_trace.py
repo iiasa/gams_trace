@@ -369,7 +369,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     if not l2.strip():
                         j += 1
                         continue
-                    if l2.strip() == ';':
+                    if ';' in l2:
                         table_lines.append(l2)
                         j += 1
                         break
