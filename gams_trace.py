@@ -483,20 +483,71 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                                         csv_found = True
                         if csv_found:
                             sym.csv_file = csv_path
-            # For parameters and scalars, skip over data definitions bounded by / ... /
+            # For parameters and scalars, handle multi-line declarations
             if stype in ['parameter', 'scalar']:
-                j = i + 1
-                in_data = False
-                while j < len(entries):
-                    l2 = entries[j].text.strip()
-                    if l2.startswith('/'):
-                        in_data = True
-                    if in_data and l2.endswith('/'):
-                        i = j
-                        break
-                    if DECL_START_RE.match(entries[j].text):
-                        break
-                    j += 1
+                if not line.strip().endswith(';'):
+                    # Multi-line declaration: accumulate until ';'
+                    accumulated_names = set(n.lower() for n in names)  # To avoid duplicates
+                    j = i + 1
+                    while j < len(entries):
+                        l2 = entries[j].text.strip()
+                        if l2 == ';':
+                            i = j
+                            break
+                        if DECL_START_RE.match(entries[j].text) or INCLUDE_RE.match(entries[j].text) or SOLVE_RE.search(entries[j].text) or MODEL_RE.search(entries[j].text):
+                            break
+                        # Parse parameter/scalar names from this line
+                        stripped_l2 = entries[j].text.strip()
+                        if stripped_l2 and not stripped_l2.startswith('*') and not stripped_l2.startswith('/'):
+                            parts = stripped_l2.split(None, 1)
+                            param_name = parts[0]
+                            dims = []
+                            if '(' in param_name:
+                                name_match = re.match(r'([A-Za-z_]\w*)\(([^)]*)\)', param_name)
+                                if name_match:
+                                    param_name = name_match.group(1)
+                                    dims_str = name_match.group(2).strip()
+                                    dims = [d.strip() for d in dims_str.split(',') if d.strip()]
+                            else:
+                                m = IDENT_RE.match(param_name)
+                                if m:
+                                    param_name = m.group(0)
+                                else:
+                                    param_name = None
+                            if param_name and param_name.lower() not in accumulated_names:
+                                accumulated_names.add(param_name.lower())
+                                psym = ensure_symbol(param_name, stype)
+                                psym.decls.append(Definition(kind='declaration', text=entries[j].text, loc=SourceLoc(entries[j].file, entries[j].line)))
+                                psym.dims = dims
+                        j += 1
+                    # Also handle potential data blocks after multi-line declarations
+                    if j < len(entries):
+                        k = i + 1
+                        in_data = False
+                        while k < len(entries):
+                            l2 = entries[k].text.strip()
+                            if l2.startswith('/'):
+                                in_data = True
+                            if in_data and l2.endswith('/'):
+                                i = k
+                                break
+                            if DECL_START_RE.match(entries[k].text):
+                                break
+                            k += 1
+                else:
+                    # Single line or data block handling
+                    j = i + 1
+                    in_data = False
+                    while j < len(entries):
+                        l2 = entries[j].text.strip()
+                        if l2.startswith('/'):
+                            in_data = True
+                        if in_data and l2.endswith('/'):
+                            i = j
+                            break
+                        if DECL_START_RE.match(entries[j].text):
+                            break
+                        j += 1
             i += 1
             continue
 
@@ -888,24 +939,37 @@ def main():
                     stype = args.list_command
                     sym = symbols.get(symbol_name.lower()) if symbol_name else None
                     if sym and sym.stype == stype:
-                        # Show definition
+                        # Show definition or declaration
+                        d = None
+                        loc = None
+                        text = None
                         if sym.defs:
                             d = sym.defs[0]  # Take first definition
+                            loc = d.loc
+                            text = d.text
+                        elif sym.decls:
+                            d = sym.decls[0]  # Take first declaration
+                            loc = d.loc
+                            text = d.text
+                        if loc:
                             if stype == 'variable':
-                                print(f"Variable {sym.original} ({sym.vtype}) defined at {d.loc.file}:{d.loc.line}")
+                                print(f"Variable {sym.original} ({sym.vtype}) declared at {loc.file}:{loc.line}")
                             else:
-                                print(f"{stype.title()} {sym.original} defined at {d.loc.file}:{d.loc.line}")
+                                print(f"{stype.title()} {sym.original} declared at {loc.file}:{loc.line}")
+                            if sym.dims:
+                                print(f"Dimensions: {', '.join(sym.dims)}")
                             # Show first <=5 lines of text
-                            lines = d.text.strip().split('\n')
-                            for i in range(min(5, len(lines))):
-                                print(lines[i])
-                            if len(lines) > 5:
-                                print("(...)")
+                            if text:
+                                lines = text.strip().split('\n')
+                                for i in range(min(5, len(lines))):
+                                    print(lines[i])
+                                if len(lines) > 5:
+                                    print("(...)")
                         else:
                             if stype == 'variable':
-                                print(f"Variable {sym.original} ({sym.vtype}) has no parsed definitions.")
+                                print(f"Variable {sym.original} ({sym.vtype}) has no parsed definitions or declarations.")
                             else:
-                                print(f"{stype.title()} {sym.original} has no parsed definitions.")
+                                print(f"{stype.title()} {sym.original} has no parsed definitions or declarations.")
                         print()
                     else:
                         print(f"No {stype} named '{symbol_name}' found.")

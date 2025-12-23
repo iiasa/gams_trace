@@ -2,7 +2,7 @@ The `gams_trace.py` script:
 
 *   Recursively loads your GAMS sources and resolves `$include` / `$batinclude`
 *   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables` (including multi-line declarations where variable lists may be comma-separated across lines, and classifying by type such as FREE, POSITIVE, etc.), `Equations`, `Model`
-*   Detects your `solve ... using lp minimizing|maximizing ...`
+*   Detects your `solve ... using ... minimizing|maximizing ...` (any solver)
 *   Builds a **dependency graph** of symbols referenced by assignments/equations
 *   Lets you query and **trace** the origin of numbers (e.g., parameters feeding the objective or a constraint’s RHS)
 
@@ -18,7 +18,7 @@ The `gams_trace.py` script:
 *   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values).
 *   **Assignments:** Records parameter/scalar assignments and their dependencies (e.g., `a(i) = b(i) + 0.1*c;` → `b` and `c`).
 *   **Equations:** Extracts equation definitions, handling multi-line equations where the '..' and sense may span across lines, and their symbol dependencies.
-*   **Solve detection:** Finds the LP solve statement, sense (`minimizing` or `maximizing`), and objective variable.
+*   **Solve detection:** Finds solve statements, solver types, sense (`minimizing` or `maximizing`), and objective variable.
 *   **Tracing:** Given a target symbol or equation, recursively traces dependencies down to raw sources (e.g., table entries, literals, or GDX files).
 
 **Limitations** (by design, to keep it broadly usable):
@@ -104,13 +104,13 @@ python gams_trace.py list unknown MY_UNKNOWN
 Typical outputs for listing:
 
 *   `parse path/to/main.gms`:
-    Parses the provided root and included `.gms` files for LP solve statements, saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
+    Parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
 
 *   `list solves`:
     Lists all detected solve statements with IDs.
 
 *   `list solve N`:
-    Shows details for the N-th solve statement: model name, sense, objective variable, and file:line. Requires solve number.
+    Shows details for the N-th solve statement: model name, solver, sense, objective variable, and file:line. Requires solve number.
 
 *   `list sets`:
     Lists all defined sets (e.g., - Myset).
@@ -207,7 +207,7 @@ solve m using lp minimizing Z;
     *   Assignments: `name(index?) = expression;`
     *   Equations: `eq .. LHS =l|e|g= RHS;`
     *   Model membership: `model m / eq1, eq2 /;`
-    *   Solve: `solve m using lp minimizing Z;`
+    *   Solve: `solve m using ... minimizing|maximizing Z;`
     *   GDX loads: `$gdxin`, `$load`, `$loaddc`
 *   It computes and prints **dependency chains**. For example, if `c(i) = base(i) + delta;` and `base(i)` comes from a `Table`, you’ll see:
         • c [parameter]
@@ -254,10 +254,10 @@ If you want deeper matrix-level details (e.g., extract exact coefficients per va
 
 While the script is standalone and doesn’t rely on external APIs, its logic mirrors common GAMS practices:
 
-*   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; LP solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
-*   The CPLEX LP solve invocation `solve m using lp` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement, GAMS—LP with CPLEX).
+*   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
+*   The GAMS solve invocation `solve m using ...` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement).
 
-> These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints. (See **GAMS User’s Guide** sections and **CPLEX solver docs** above.)
+> These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints. (See **GAMS User’s Guide** sections above.)
 
 ***
 
