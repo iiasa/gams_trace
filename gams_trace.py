@@ -79,6 +79,7 @@ IDENT_RE = re.compile(r"\b([A-Za-z_]\w*)\b")
 BUILTINS = {"sum","smin","smax","min","max","ord","card","power","exp","log","abs",
             "uniform","normal","floor","ceil","round","yes","no"}
 DECL_START_RE = re.compile(r"^\s*(sets?|parameters?|scalars?|tables?|variables?|equations?|free|positive|negative|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)\b", re.IGNORECASE)
+DECL_LINE_RE = re.compile(r'^\s*([A-Za-z_]\w*)\s*\(\s*([^)]*)\s*\)?', re.IGNORECASE)
 INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE | re.DOTALL)
 GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE | re.DOTALL)
 LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE | re.DOTALL)
@@ -511,6 +512,13 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     while j < len(entries):
                         l2 = entries[j].text.strip()
                         if DECL_START_RE.match(entries[j].text) or INCLUDE_RE.match(entries[j].text) or SOLVE_RE.search(entries[j].text) or MODEL_RE.search(entries[j].text):
+                            break
+                        # Stop accumulation at execution statements (even without semicolon)
+                        word_match = re.search(r'^\s*([A-Za-z_]\w*)', l2)
+                        first_word = word_match.group(1) if word_match else ''
+                        if first_word.lower() in NON_ASSIGNABLE_KEYWORDS:
+                            break
+                        if not DECL_LINE_RE.match(entries[j].text):
                             break
                         # Parse parameter/scalar names from this line
                         stripped_l2 = entries[j].text.strip()

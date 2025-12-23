@@ -13,6 +13,7 @@ The `gams_trace.py` script:
 **Capabilities** (static analysis):
 
 *   **Includes:** Recursively resolves `$include` and `$batinclude`, inlining the included file contents at the point of inclusion (matching GAMS compilation behavior). Allows multiple inclusions of the same file. Ignores comments (* lines and $ontext/$offtext blocks) during parsing to avoid interference with code analysis. Excludes .csv files bracketed in $ondelim/$offdelim. For $batinclude, handles argument substitution (e.g., `%1%` replaced with first argument).
+*   **Declaration Parsing:** Handles multi-line declarations for parameters, scalars, and sets interrupted by comments or whitespace, but stops accumulation when encountering execution statements (e.g., LOOP, IF) even without semicolons, following GAMS rules that declarations may not contain flow-control blocks.
 *   **Line Tracking:** Maintains original source file and line number for every line in the merged code, ensuring accurate source attribution in output.
 *   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
 *   **Tables:** Parses simple rectangular `Table` blocks and captures numeric entries (row/column keyed values). Captures dimensions where specified.
