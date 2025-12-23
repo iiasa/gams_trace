@@ -491,9 +491,6 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     j = i + 1
                     while j < len(entries):
                         l2 = entries[j].text.strip()
-                        if l2 == ';':
-                            i = j
-                            break
                         if DECL_START_RE.match(entries[j].text) or INCLUDE_RE.match(entries[j].text) or SOLVE_RE.search(entries[j].text) or MODEL_RE.search(entries[j].text):
                             break
                         # Parse parameter/scalar names from this line
@@ -519,6 +516,10 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                                 psym = ensure_symbol(param_name, stype)
                                 psym.decls.append(Definition(kind='declaration', text=entries[j].text, loc=SourceLoc(entries[j].file, entries[j].line)))
                                 psym.dims = dims
+                        # Check for end of block after parsing
+                        if ';' in l2:
+                            i = j
+                            break
                         j += 1
                     # Also handle potential data blocks after multi-line declarations
                     if j < len(entries):
