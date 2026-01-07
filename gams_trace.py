@@ -50,6 +50,7 @@ class SymbolInfo:
     dims: List[str] = field(default_factory=list)
     csv_file: Optional[str] = None  # for sets/tables loaded from CSV via $ondelim
     vtype: Optional[str] = None  # Variable type: POSITIVE, FREE, BINARY, etc. (for variables only)
+    base_set: Optional[str] = None  # for set aliases, the base set name
 
 @dataclass
 class ModelInfo:
@@ -91,6 +92,19 @@ EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*
 VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s+(.+);", re.IGNORECASE)
 MULTI_VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
+ALIAS_RE = re.compile(r"^\s*alias\s*\(\s*([a-zA-Z_]\w*)\s*,\s*(.+?)\s*\)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+
+def find_idents_with_aliases(expr: str, aliases: Dict[str, str]) -> Set[str]:
+    ids = set()
+    for m in IDENT_RE.finditer(expr):
+        token = m.group(1)
+        if token.isnumeric():
+            continue
+        if token.lower() in BUILTINS:
+            continue
+        resolved = aliases.get(token.lower(), token.lower())
+        ids.add(resolved)
+    return ids
 
 
 def norm_ident(s: str) -> str:
@@ -242,10 +256,11 @@ NON_ASSIGNABLE_KEYWORDS = frozenset({
     'semiinteger', 'semiint', 'sos1', 'sos2'
 })
 
-def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo]]:
+def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[ModelInfo], List[SolveInfo], Dict[str, str]]:
     symbols: Dict[str, SymbolInfo] = {}
     models: List[ModelInfo] = []
     solves: List[SolveInfo] = []
+    aliases: Dict[str, str] = {}
 
     def ensure_symbol(name: str, stype: str) -> SymbolInfo:
         original = name
@@ -290,6 +305,20 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             for sym_name in symbols_list:
                 sym = ensure_symbol(sym_name, 'unknown')
                 sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
+            i += 1
+            continue
+
+        # Alias parsing
+        am = ALIAS_RE.match(line)
+        if am:
+            base = am.group(1).strip()
+            aliases_str = am.group(2)
+            alias_list = [a.strip().lower() for a in aliases_str.split(',') if a.strip()]
+            base_lower = base.lower()
+            for a in alias_list:
+                sym = ensure_symbol(a.lower(), 'set')
+                sym.base_set = base_lower
+                sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
             i += 1
             continue
 
@@ -754,6 +783,12 @@ def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visi
                 out.append("  "*depth + f"  ├─ equation at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
             elif d.kind == 'gdx_load':
                 out.append("  "*depth + f"  ├─ GDX load at {d.loc.file}:{d.loc.line} from '{d.gdx_file}'")
+            elif d.kind == 'alias_declaration':
+                out.append("  "*depth + f"  ├─ alias_declaration at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                if sym.base_set:
+                    base_sym = symbols.get(sym.base_set.lower())
+                    if base_sym:
+                        out.extend(trace_symbol(symbols, sym.base_set, depth+1, visited, exclude_sets))
             else:
                 out.append("  "*depth + f"  ├─ {d.kind} at {d.loc.file}:{d.loc.line}")
             dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(d.deps)}
@@ -761,6 +796,20 @@ def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visi
                 if not dep_sym or (exclude_sets and dep_sym.stype == 'set'):
                     continue
                 out.extend(trace_symbol(symbols, dep_name, depth+1, visited, exclude_sets))
+    elif sym.decls and any(d.kind == 'alias_declaration' for d in sym.decls):
+        for d in sym.decls:
+            if d.kind == 'alias_declaration':
+                out.append("  "*depth + f"  ├─ alias_declaration at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                if sym.base_set:
+                    base_sym = symbols.get(sym.base_set.lower())
+                    if base_sym:
+                        out.extend(trace_symbol(symbols, sym.base_set, depth+1, visited, exclude_sets))
+                break  # assuming only one
+    elif sym.decls and any(d.kind == 'declaration' for d in sym.decls):
+        for d in sym.decls:
+            if d.kind == 'declaration':
+                out.append("  "*depth + f"  ├─ declaration at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                break
     else:
         out.append("  "*depth + f"  ├─ no definitions found (may be loaded via GDX or includes not captured)")
     return out
@@ -988,6 +1037,8 @@ def main():
                                 print(f"{stype.title()} {sym.original} declared at {loc.file}:{loc.line}")
                             if sym.dims:
                                 print(f"Dimensions: {', '.join(sym.dims)}")
+                            if stype == 'set' and sym.base_set:
+                                print(f"This set is an alias for {symbols.get(sym.base_set.lower()).original}.")
                             # Show first <=5 lines of text
                             if text:
                                 lines = text.strip().split('\n')

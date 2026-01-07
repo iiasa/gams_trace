@@ -4,6 +4,7 @@ The `gams_trace.py` script:
 *   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables` (including multi-line declarations where variable lists may be comma-separated across lines, and classifying by type such as FREE, POSITIVE, etc.), `Equations`, `Model`
 *   Detects your `solve ... using ... minimizing|maximizing ...` (any solver)
 *   Builds a **dependency graph** of symbols referenced by assignments/equations
+*   Recognizes and resolves `alias` declarations for set alternative names
 *   Lets you query and **trace** the origin of data (e.g., parameters feeding the objective or a constraint’s RHS)
 
 > ⚠️ **Warning**
