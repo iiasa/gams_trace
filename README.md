@@ -218,12 +218,14 @@ solve m using lp minimizing Z;
     *   Solve: `solve m using ... minimizing|maximizing Z;`
     *   GDX loads: `$gdxin`, `$load`, `$loaddc`
 *   It computes and prints **dependency chains**. For example, if `c(i) = base(i) + delta;` and `base(i)` comes from a `Table`, you’ll see:
+```
         • c [parameter]
           ├─ assignment at mymodel.gms:42: c(i) = base(i) + delta;
             • base [parameter]
               ├─ table at data.gms:12 with 6 numeric entries
             • delta [scalar]
               ├─ assignment at params.gms:7: delta = 0.15;
+```
 
 ***
 
@@ -258,4 +260,4 @@ While the script is standalone and doesn’t rely on external APIs, its logic mi
 *   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
 *   The GAMS solve invocation `solve m using ...` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement).
 
-> These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints. (See **GAMS User’s Guide** sections above.)
+> These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints.
