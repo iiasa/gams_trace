@@ -722,7 +722,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
 # Tracing utilities
 # ----------------------------
 
-def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visited: Optional[Set[str]] = None) -> List[str]:
+def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visited: Optional[Set[str]] = None, exclude_sets: bool = False) -> List[str]:
     """Return textual trace for a symbol: where its values come from (assignments, tables, deps)."""
     name = norm_ident(name).lower()
     if visited is None:
@@ -756,10 +756,11 @@ def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visi
                 out.append("  "*depth + f"  ├─ GDX load at {d.loc.file}:{d.loc.line} from '{d.gdx_file}'")
             else:
                 out.append("  "*depth + f"  ├─ {d.kind} at {d.loc.file}:{d.loc.line}")
-            for dep in sorted(d.deps):
-                if dep == name:
+            dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(d.deps)}
+            for dep_name, dep_sym in dep_symbols.items():
+                if not dep_sym or (exclude_sets and dep_sym.stype == 'set'):
                     continue
-                out.extend(trace_symbol(symbols, dep, depth+1, visited))
+                out.extend(trace_symbol(symbols, dep_name, depth+1, visited, exclude_sets))
     else:
         out.append("  "*depth + f"  ├─ no definitions found (may be loaded via GDX or includes not captured)")
     return out
@@ -784,7 +785,7 @@ def extract_objective(symbols: Dict[str, SymbolInfo], solve: Optional[SolveInfo]
     return s, None
 
 
-def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str) -> List[str]:
+def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str, exclude_sets: bool = False) -> List[str]:
     eq = symbols.get(eq_name.lower()) if eq_name else None
     if not eq or eq.stype != 'equation':
         return [f"Equation '{eq_name}' not found."]
@@ -795,9 +796,12 @@ def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str) -> List[str]:
         out.append(f"Equation {eq.original} defined at {d.loc.file}:{d.loc.line}")
         out.append(d.text.strip())
         out.append("Dependencies:")
-        for dep in sorted(d.deps):
-            out.append(f"  - {dep}")
-            out.extend(trace_symbol(symbols, dep, depth=1))
+        dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(d.deps)}
+        for dep_name, dep_sym in dep_symbols.items():
+            if not dep_sym or (exclude_sets and dep_sym.stype == 'set'):
+                continue
+            out.append(f"  - {dep_name}")
+            out.extend(trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets))
     return out
 
 # ----------------------------
@@ -805,7 +809,7 @@ def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str) -> List[str]:
 # ----------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS model. Use subcommands: parse to load, list to list solves/solve, trace for tracing.")
+    ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS model. Use subcommands: parse to load, list to list solves/solve, trace/trace_with_sets for tracing.")
     subparsers = ap.add_subparsers(dest='subcommand', help='Available subcommands')
 
     # parse subcommand
@@ -831,8 +835,12 @@ def main():
         singular.add_argument('symbol_name', help=f'Name of the {singular_stype}')
 
     # trace subcommand
-    trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations')
+    trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations (excludes sets from output)')
     trace_sub.add_argument('target', nargs=argparse.REMAINDER, help='Objective or symbol/equation name to trace; for objective, optional solve number follows')
+
+    # trace_with_sets subcommand
+    trace_with_sets_sub = subparsers.add_parser('trace_with_sets', help='Trace objective, symbols, or equations (includes sets in output)')
+    trace_with_sets_sub.add_argument('target', nargs=argparse.REMAINDER, help='Objective or symbol/equation name to trace; for objective, optional solve number follows')
 
     args = ap.parse_args()
 
@@ -1005,6 +1013,12 @@ def main():
                         print()
 
         elif args.subcommand == 'trace':
+            exclude_sets = True
+        elif args.subcommand == 'trace_with_sets':
+            exclude_sets = False
+
+        if args.subcommand in ['trace', 'trace_with_sets']:
+
             target = args.target
             if target and target[0].lower() == 'objective':
                 solve_num = int(target[1]) if len(target) > 1 else None
@@ -1036,11 +1050,12 @@ def main():
                         print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
                         print(obj_def.text.strip())
                         print("\nTracing dependencies of the objective expression:")
-                        for dep in sorted(obj_def.deps):
-                            if dep == s.objvar:
+                        dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(obj_def.deps)}
+                        for dep_name, dep_sym in dep_symbols.items():
+                            if dep_name == s.objvar or (exclude_sets and dep_sym and dep_sym.stype == 'set'):
                                 continue
-                            print(f"- {dep}")
-                            for ln in trace_symbol(symbols, dep, depth=1):
+                            print(f"- {dep_name}")
+                            for ln in trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets):
                                 print(ln)
                     else:
                         print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
@@ -1049,13 +1064,18 @@ def main():
                 # trace symbol or equation
                 name = target[0] if target else None
                 if name:
+                    if exclude_sets:
+                        sym = symbols.get(name.lower())
+                        if sym and sym.stype == 'set':
+                            print(f"Error: Cannot trace sets with 'trace' command. Use 'trace_with_sets' instead.")
+                            sys.exit(1)
                     sym = symbols.get(name.lower())
                     if sym and sym.stype == 'equation':
-                        for ln in explain_equation(symbols, name):
+                        for ln in explain_equation(symbols, name, exclude_sets=exclude_sets):
                             print(ln)
                         print()
                     else:
-                        for ln in trace_symbol(symbols, name):
+                        for ln in trace_symbol(symbols, name, exclude_sets=exclude_sets):
                             print(ln)
                         print()
                 else:

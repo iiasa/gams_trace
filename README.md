@@ -151,7 +151,7 @@ Typical outputs for listing:
 
 ### Tracing Commands
 
-Trace dependencies:
+Trace dependencies (excluding sets by default):
 
 ```bash
 python gams_trace.py trace objective
@@ -160,17 +160,39 @@ python gams_trace.py trace eq_supply
 python gams_trace.py trace A
 ```
 
+Trace dependencies (including sets):
+
+```bash
+python gams_trace.py trace_with_sets objective
+python gams_trace.py trace_with_sets objective 1
+python gams_trace.py trace_with_sets eq_supply
+python gams_trace.py trace_with_sets A
+python gams_trace.py trace_with_sets set_name
+```
+
 Typical outputs for tracing:
 
 *   `trace objective`:
     Prompts for a solve number if not provided, then prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
-    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines.
+    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines, excluding any sets from the output.
 
 *   `trace <eq_name>`:
-    Prints the equation definition and traces **all parameters** appearing on LHS/RHS. Works globally without solve context.
+    Prints the equation definition and traces **all parameters** appearing on LHS/RHS, excluding sets. Works globally without solve context.
 
 *   `trace <symbol>`:
-    Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies. Works globally without solve context.
+    Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies, excluding sets. Works globally without solve context.
+
+*   `trace_with_sets objective`:
+    Same as `trace objective`, but includes sets in dependency outputs if present.
+
+*   `trace_with_sets <eq_name>`:
+    Prints the equation definition and traces **all parameters** appearing on LHS/RHS, including sets. Works globally without solve context.
+
+*   `trace_with_sets <symbol>`:
+    Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies, including sets. Works globally without solve context.
+
+*   `trace_with_sets <set>`:
+    Traces a set to its raw sources, following dependencies including other sets.
 
 ***
 
