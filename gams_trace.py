@@ -844,25 +844,9 @@ def main():
 
     args = ap.parse_args()
 
-    # If no args provided and parse data exists, show summary
-
+    # If no args provided, show usage
     if args.subcommand is None:
-        if not os.path.exists('gams_trace.parse'):
-            ap.print_help()
-            sys.exit(1)
-        with open('gams_trace.parse', 'rb') as f:
-            pickled_data = pickle.load(f)
-            if len(pickled_data) != 4:
-                print("Error: gams_trace.parse is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
-                sys.exit(1)
-            files, symbols, models, solves = pickled_data
-        print("Parsed symbols summary:")
-        stype_counts = defaultdict(int)
-        for sym in symbols.values():
-            stype_counts[sym.stype] += 1
-        for stype, count in sorted(stype_counts.items()):
-            print(f"{stype}: {count}")
-        print("\nTip: use 'trace objective', 'trace <eqname>', or 'trace <symbol>' to see detailed traces.")
+        ap.print_help()
         sys.exit(0)
 
     symbols = None
@@ -944,6 +928,15 @@ def main():
                 print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
                 print()
             else:
+                if args.list_command is None:
+                    # Show summary
+                    print("Parsed symbols summary:")
+                    stype_counts = defaultdict(int)
+                    for sym in symbols.values():
+                        stype_counts[sym.stype] += 1
+                    for stype, count in sorted(stype_counts.items()):
+                        print(f"{stype}: {count}")
+                    sys.exit(0)
                 # Handle symbol type lists
                 plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
                 singular_types = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknown']

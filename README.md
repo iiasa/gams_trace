@@ -45,10 +45,12 @@ The `gams_trace.py` script:
 
 ## Usage
 
-If parse data (from a prior run) exists, running without arguments displays a summary of symbol types and counts:
+Running without arguments displays usage information.
+
+To display a summary of symbol types and counts (requires parse data from a prior run):
 
 ```bash
-python gams_trace.py
+python gams_trace.py list
 ```
 
 Example output:
@@ -62,14 +64,7 @@ tables: 61
 variables: 0
 unknown: 1348
 
-Tip: use 'trace objective', 'trace <eqname>', or 'trace <symbol>' to see detailed traces.
-```
-
-First, parse the GAMS model (this will save parsed data to `gams_trace.parse` and list aggregate counts of solves and symbols, including the number of unidentified symbols; detailed solve information is saved to `gams_trace.solves`):
-
-```bash
-python gams_trace.py parse path/to/main.gms
-python gams_trace.py save path/to/merged.gms
+Usage tip: Use 'python gams_trace.py --help' for more information.
 ```
 
 First, parse the GAMS model (saves data to `gams_trace.parse`):
@@ -89,6 +84,8 @@ This saves the merged decommented source (all `$include` and `$batinclude` files
 ### Listing Commands
 
 First, parse the model as above. Then list components. Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
+
+Using `list` without additional arguments displays the symbol summary described above.
 
 ```bash
 python gams_trace.py list solves
@@ -288,3 +285,4 @@ While the script is standalone and doesn’t rely on external APIs, its logic mi
 *   The GAMS solve invocation `solve m using ...` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement).
 
 > These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints.
+
