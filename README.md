@@ -4,7 +4,13 @@ The `gams_trace.py` script:
 *   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables` (including multi-line declarations where variable lists may be comma-separated across lines, and classifying by type such as FREE, POSITIVE, etc.), `Equations`, `Model`
 *   Detects your `solve ... using ... minimizing|maximizing ...` (any solver)
 *   Builds a **dependency graph** of symbols referenced by assignments/equations
-*   Lets you query and **trace** the origin of numbers (e.g., parameters feeding the objective or a constraint’s RHS)
+*   Lets you query and **trace** the origin of data (e.g., parameters feeding the objective or a constraint’s RHS)
+
+> ⚠️ **Warning**
+> The parser is not a full GAMS parser, the script does not compile nor execute GAMS code. Hence:
+> - Conditional code execution is not resolved when tracing.
+> - Exceptional GAMS syntax constructs will be handled incorrectly.
+> - Results should be taken with a grain of salt: useful for exploration and discovery, not useful for obtaining hard truth.
 
 ***
 
@@ -245,10 +251,10 @@ If you want deeper matrix-level details (e.g., extract exact coefficients per va
 
 ***
 
-## Next steps (tailored to IBF workflows)
+## Next steps
 
-*   If you share a *small anonymized snippet* of your `.gms` (especially your objective and 2–3 representative constraints), I can tweak the parser to your style (e.g., handling `alias`, special functions, or your typical table layouts).
 *   For symbols loaded from GDX files, tracing now shows the GDX file path and load location. No parsing of GDX contents itself.
+*   produce a per-constraint JSON (variables → coefficients → source lines).
 
 ***
 
@@ -260,12 +266,3 @@ While the script is standalone and doesn’t rely on external APIs, its logic mi
 *   The GAMS solve invocation `solve m using ...` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement).
 
 > These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints. (See **GAMS User’s Guide** sections above.)
-
-***
-
-Would you like me to adapt the script to:
-
-*   produce a per-constraint JSON (variables → coefficients → source lines), or
-*   generate a Markdown report summarizing objective and top constraints with provenance?
-
-If you can share the names of the **objective variable** and a few **equation names** you care most about, I’ll tailor the output for your current project.
