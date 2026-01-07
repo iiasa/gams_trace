@@ -194,6 +194,11 @@ Typical outputs for tracing:
 *   `trace_with_sets <set>`:
     Traces a set to its raw sources, following dependencies including other sets.
 
+**Note on Cycle Detection:**
+*   If tracing outputs `↪ {symbol_name} (cycle detected)`, it indicates a circular dependency in the symbol reference graph.
+*   This prevents infinite recursion when symbols reference each other directly or indirectly (e.g., `param a = b;` and `param b = a + 1;`).
+*   Cycles are rare in valid models but may signal potential logical errors.
+
 ***
 
 ## Example (mini demonstration)
