@@ -241,20 +241,13 @@ python gams_trace.py trace objective 1
 
 ***
 
-## Extending the script to your needs
+## Possible future features
 
-If you want deeper matrix-level details (e.g., extract exact coefficients per variable per constraint), we can extend the parser to:
-
+*   For symbols loaded from GDX files, tracing now shows the GDX file path and load location. Could analyze GDX contents to obtain further detail.
 *   Identify **variable terms** (e.g., `param(i,j)*x(i,j)`) and separate **parameter** vs. **variable** tokens
 *   Expand common aggregates (`sum(i, ...)`) and track indices to map to rows/columns
 *   Optionally emit a **symbolic sparse matrix** listing constraints vs variables and the **source** of each coefficient (assignment/table and file:line).
-
-***
-
-## Next steps
-
-*   For symbols loaded from GDX files, tracing now shows the GDX file path and load location. No parsing of GDX contents itself.
-*   produce a per-constraint JSON (variables → coefficients → source lines).
+*   Produce a per-constraint JSON (variables → coefficients → source lines).
 
 ***
 
