@@ -47,7 +47,25 @@ The `gams_trace.py` script:
 
 Running without arguments displays usage information.
 
-To display a summary of symbol types and counts (requires parse data from a prior run):
+First, parse the GAMS model (saves data to `gams_trace.parse`):
+
+```bash
+python gams_trace.py parse path/to/main.gms
+```
+
+This parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
+
+You can save the merged and decommented GAMS code:
+
+```bash
+python gams_trace.py save path/to/merged.gms
+```
+
+This saves the merged decommented GAMS code (all `$include` and `$batinclude` files inlined, comments removed) to the specified output file for review.
+
+### Listing Commands
+
+First, parse the model as above. Then you cacn list symbols. To display a summary of symbol types and counts invoke:
 
 ```bash
 python gams_trace.py list
@@ -55,37 +73,18 @@ python gams_trace.py list
 
 Example output:
 ```
+Parsed data loaded from gams_trace.parse
 Parsed symbols summary:
-equations: 6
-parameters: 164
-scalars: 9
-sets: 173
-tables: 61
-variables: 0
-unknown: 1348
-
-Usage tip: Use 'python gams_trace.py --help' for more information.
+eequation: 73
+parameter: 1370
+scalar: 9
+set: 173
+table: 61
+unknown: 254
+variable: 76
 ```
 
-First, parse the GAMS model (saves data to `gams_trace.parse`):
-
-```bash
-python gams_trace.py parse path/to/main.gms
-```
-
-Then, save the merged and decommented source to a file:
-
-```bash
-python gams_trace.py save path/to/merged.gms
-```
-
-This saves the merged decommented source (all `$include` and `$batinclude` files inlined, comments removed) to the specified output file.
-
-### Listing Commands
-
-First, parse the model as above. Then list components. Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
-
-Using `list` without additional arguments displays the symbol summary described above.
+To list the symbols of a given type, or to list a particular symbol in detail, invoke:
 
 ```bash
 python gams_trace.py list solves
@@ -106,10 +105,9 @@ python gams_trace.py list equation MY_EQ
 python gams_trace.py list unknown MY_UNKNOWN
 ```
 
-Typical outputs for listing:
+ Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
 
-*   `parse path/to/main.gms`:
-    Parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
+Detailed explanation of symbol listing:
 
 *   `list solves`:
     Lists all detected solve statements with IDs.
