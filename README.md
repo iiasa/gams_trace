@@ -44,7 +44,7 @@ The `gams_trace.py` script:
 
 ***
 
-## Usage
+## Parse
 
 Running without arguments displays usage information.
 
@@ -56,7 +56,9 @@ python gams_trace.py parse path/to/main.gms
 
 This parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
 
-You can save the merged and decommented GAMS code:
+## Save
+
+After parsing, you can save the merged and decommented GAMS code:
 
 ```bash
 python gams_trace.py save path/to/merged.gms
@@ -64,9 +66,9 @@ python gams_trace.py save path/to/merged.gms
 
 This saves the merged decommented GAMS code (all `$include` and `$batinclude` files inlined, comments removed) to the specified output file for review.
 
-### Listing Commands
+## List
 
-First, parse the model as above. Then you cacn list symbols. To display a summary of symbol types and counts invoke:
+Parsed symbols can be listed via the `list` subcommand. Without futher parameters, this subcommand displays a summary of symbol types and counts:
 
 ```bash
 python gams_trace.py list
@@ -76,16 +78,16 @@ Example output:
 ```
 Parsed data loaded from gams_trace.parse
 Parsed symbols summary:
-eequation: 73
-parameter: 1370
-scalar: 9
-set: 173
-table: 61
+equations: 73
+parameters: 1370
+scalars: 9
+sets: 219
+tables: 61
 unknown: 254
-variable: 76
+variables: 76
 ```
 
-To list the symbols of a given type, or to list a particular symbol in detail, invoke:
+To list the symbols of a given type invoke:
 
 ```bash
 python gams_trace.py list solves
@@ -97,16 +99,7 @@ python gams_trace.py list tables
 python gams_trace.py list variables
 python gams_trace.py list equations
 python gams_trace.py list unknowns
-python gams_trace.py list set MY_SET
-python gams_trace.py list parameter MY_PARAM
-python gams_trace.py list scalar MY_SCALAR
-python gams_trace.py list table MY_TABLE
-python gams_trace.py list variable MY_VAR
-python gams_trace.py list equation MY_EQ
-python gams_trace.py list unknown MY_UNKNOWN
 ```
-
- Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
 
 Detailed explanation of symbol listing:
 
@@ -137,15 +130,20 @@ Detailed explanation of symbol listing:
 *   `list unknowns`:
     Lists all symbols encountered that could not be classified or linked to declarations (e.g., - Unclassified_symbol).
 
-*   `list set MY_SET`:
-    Shows the definition location and first ≤5 lines of the set declaration.
+## Show
 
-*   `list parameter MY_PARAM`:
-    Shows the definition location and first ≤5 lines of the parameter assignment/declaration.
+Shows the definition location, type, dimensions (if any), and first ≤5 lines of the declaration or definition for the specified symbol. Works for any symbol type including unknowns.
 
-*   Similarly for `scalar`, `table`, `variable`, `equation`: shows definition location and first ≤5 lines.
+ Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
 
-### Tracing Commands
+```
+python gams_trace.py show MY_SYMBOL
+```
+
+*   `show MY_SYMBOL`:
+    
+
+## Trace Commands
 
 Trace dependencies (excluding sets by default):
 
@@ -197,7 +195,7 @@ Typical outputs for tracing:
 
 ***
 
-## Example (mini demonstration)
+### Example (mini demonstration)
 
 Suppose part of your GAMS code looks like:
 
@@ -254,7 +252,7 @@ solve m using lp minimizing Z;
 
 ## Installation / Run
 
-1.  Save the file locally (download link above).
+1.  Save the scruot locally.
 2.  Run it with Python 3:
 
 ```bash
@@ -284,4 +282,6 @@ While the script is standalone and doesn’t rely on external APIs, its logic mi
 *   The GAMS solve invocation `solve m using ...` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement).
 
 > These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints.
+
+*   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
 
