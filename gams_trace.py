@@ -20,6 +20,7 @@ class IncludeError(Exception):
             super().__init__(message)
 
 REGION = "REGION59"
+PARSE_PICKLE_FILE = os.path.splitext(os.path.basename(__file__))[0] + ".parse"
 
 # ----------------------------
 # Data structures
@@ -924,9 +925,9 @@ def main():
 
         # Save parse pickle
         pickled_data = (files, symbols, models, solves)
-        with open('gams_trace.parse', 'wb') as f:
+        with open(PARSE_PICKLE_FILE, 'wb') as f:
             pickle.dump(pickled_data, f)
-        print("\rParsing complete, saved parse tree to gams_trace.parse", flush=True)
+        print(f"\rParsing complete, saved parse tree to {PARSE_PICKLE_FILE}", flush=True)
 
         # Print summary
         print(f"solves: {len(solves)}")
@@ -934,16 +935,17 @@ def main():
 
     else:
         # Load parse pickle
-        if not os.path.exists('gams_trace.parse'):
+        if not os.path.exists(PARSE_PICKLE_FILE):
             print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with 'parse <gms_file>' first.")
             sys.exit(1)
-        with open('gams_trace.parse', 'rb') as f:
+        with open(PARSE_PICKLE_FILE, 'rb') as f:
+            print(f"Loading parse data...", end='', flush=True)
             pickled_data = pickle.load(f)
             if len(pickled_data) != 4:
-                print("Error: gams_trace.parse is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
+                print(f"\rError: {PARSE_PICKLE_FILE} is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
                 sys.exit(1)
+            print(f"\rParse data loaded from {PARSE_PICKLE_FILE}.")
             files, symbols, models, solves = pickled_data
-        print("Parsed data loaded from gams_trace.parse")
 
         if args.subcommand == 'list':
             if args.list_command == 'solves':

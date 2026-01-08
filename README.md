@@ -34,7 +34,6 @@ The `gams_trace.py` script:
 
 *   Does not evaluate compile-time conditionals (`$if`, `$eval`) or macros.
 *   Does not process other GDX I/O (e.g., `execute_load`, `execute_unload`).
-*   Does not load or parse .csv files; tracks CSV file paths for set/table sources.
 *   Table parsing supports common rectangular numeric tables; unusual layouts may need adjustments.
 *   Coefficient extraction in expressions is heuristic—it traces *parameters used* rather than numerically building the full matrix.
 
@@ -49,7 +48,6 @@ The `gams_trace.py` script:
 Running without arguments or passing `-h` or `--help` as a first arguement displays usage information. The first arguement selects a subcommand that invokes a particular script action. The subcommands are `parse`, `save`, `list`, `show`, `trace`, and `trace_with_sets`.
 
 ## Parse
-
 
 First, parse the GAMS model (saves data to `gams_trace.parse`):
 
@@ -237,10 +235,11 @@ solve m using lp minimizing Z;
 
 ## Installation / Run
 
-1.  Save the scruot locally.
+1.  Save the script locally.
 2.  Run it with Python 3:
 
 ```bash
+python gams_trace.py --help
 python gams_trace.py parse /path/to/your/main.gms
 python gams_trace.py trace 1
 ```
@@ -259,15 +258,13 @@ python gams_trace.py trace 1
 
 ***
 
-## References (conceptual background)
+## Conceptual Background
 
 While the script is standalone and doesn’t rely on external APIs, its logic mirrors common GAMS practices:
 
-*   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
+*   [GAMS documentation](https://gams.com/latest/docs/) on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
 *   The GAMS solve invocation `solve m using ...` and objective sense `minimizing|maximizing` follows the standard GAMS solve syntax (GAMS—Solve Statement).
 
 > These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints.
 
 *   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
-
-
