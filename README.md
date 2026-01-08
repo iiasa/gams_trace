@@ -46,7 +46,7 @@ The `gams_trace.py` script:
 
 ## Usage
 
-Running without arguments or passing `-h` or --help` as a first arguement displays usage information. The first arguement selects a subcommand that invokes a particular script action. The subcommands are `parse`, `save`, `list`, `show`, `trace`, and `trace_with_sets`.
+Running without arguments or passing `-h` or `--help` as a first arguement displays usage information. The first arguement selects a subcommand that invokes a particular script action. The subcommands are `parse`, `save`, `list`, `show`, `trace`, and `trace_with_sets`.
 
 ## Parse
 
@@ -90,7 +90,7 @@ unknown: 254
 variables: 76
 ```
 
-To list the parsed symbols of a given type, invoke:
+To list all parsed symbols of a given type, invoke:
 
 ```bash
 python gams_trace.py list solves
@@ -112,28 +112,28 @@ python gams_trace.py list solves
 Detailed explanation:
 
 *   `list sets`:
-    Lists all parsed sets alphabetically.
+    Lists parsed sets alphabetically.
 
 *   `list parameters`:
-    Lists all parsed parameters alphabetically.
+    Lists parsed parameters alphabetically.
 
 *   `list scalars`:
-    Lists all parsed scalars alphabetically.
+    Lists parsed scalars alphabetically.
 
 *   `list tables`:
-    Lists all parsed tables alphabetically.
+    Lists parsed tables alphabetically.
 
 *   `list variables`:
-    Lists all parsed variables grouped by variable type (e.g., Free Variables: - X, - Y; Positive Variables: - Z).
+    Lists parsed variables grouped by variable type (e.g., Free Variables: - X, - Y; Positive Variables: - Z).
 
 *   `list equations`:
-    Lists all parsed equations alphabetically.
+    Lists parsed equations alphabetically.
 
 *   `list unknowns`:
-    Lists all symbols encountered that could not be classified or linked to declarations.
+    Lists parsed symbols of unknown: encountered but could not be classified or linked to declarations.
 
 *   `list solves`:
-    Lists all detected solve statements with index numbers.
+    Lists parsd solve statements with index numbers.
 
 ## Show
 
@@ -148,45 +148,27 @@ python gams_trace.py show SOLVE_INDEX_NUMBER
 
 ## Trace
 
-The `trace` and `trace_with_sets` subcommands trace dependencies. The former excludes sets from the tracing for brevity. Invocations:
+The `trace` and `trace_with_sets` subcommands trace data/value dependencies. The former excludes sets from the tracing for brevity. Invocations:
 
 ```bash
-python gams_trace.py trace objective
-python gams_trace.py trace objective 1
-python gams_trace.py trace eq_supply
-python gams_trace.py trace A
+python gams_trace.py trace MY_SYMBOL
+python gams_trace.py trace 4
+python gams_trace.py trace_with_sets MY_SYMBOL
+python gams_trace.py trace_with_sets MY_SET
+python gams_trace.py trace_with_sets 1
 ```
 
-Trace dependencies (including sets):
-
-```bash
-python gams_trace.py trace_with_sets objective
-python gams_trace.py trace_with_sets objective 1
-python gams_trace.py trace_with_sets eq_supply
-python gams_trace.py trace_with_sets A
-python gams_trace.py trace_with_sets set_name
-```
-
-Typical outputs for tracing:
-
-*   `trace objective`:
-    Prompts for a solve number if not provided, then prints the objective variable and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
-    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines, excluding any sets from the output.
-
-*   `trace <eq_name>`:
-    Prints the equation definition and traces **all parameters** appearing on LHS/RHS, excluding sets. Works globally without solve context.
+Detailed explanation:
 
 *   `trace <symbol>`:
     Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies, excluding sets. Works globally without solve context.
 
-*   `trace_with_sets objective`:
-    Same as `trace objective`, but includes sets in dependency outputs if present.
+*   `trace N`:
+    Prints the objective variable of the N-th solve statement and attempts to locate the **objective-defining equation** (e.g., `obj .. Z =e= sum(i, c(i) * x(i));`).
+    Then it **traces** all parameters in that expression (e.g., `c(i)`) back to table entries or assignment lines, excluding any sets from the output.
 
-*   `trace_with_sets <eq_name>`:
-    Prints the equation definition and traces **all parameters** appearing on LHS/RHS, including sets. Works globally without solve context.
-
-*   `trace_with_sets <symbol>`:
-    Traces a parameter/scalar/table/variable symbol back to its **raw sources** (table values and/or assignment lines), following any layers of dependencies, including sets. Works globally without solve context.
+*   `trace <eq_name>`:
+    Prints the equation definition and traces **all parameters** appearing on LHS/RHS, excluding sets. Works globally without solve context.
 
 *   `trace_with_sets <set>`:
     Traces a set to its raw sources, following dependencies including other sets.
@@ -227,7 +209,7 @@ Model m / obj, supply, satisfy /;
 solve m using lp minimizing Z;
 ```
 
-*   `trace objective`: will show the `obj` equation and trace `cost` to the `Table` block (and print entries).
+*   `trace 1`: will show the `obj` equation and trace `cost` to the `Table` block (and print entries).
 *   `trace satisfy`: will trace `demand(j)` to the inline parameter assignment.
 
 ***
@@ -260,7 +242,7 @@ solve m using lp minimizing Z;
 
 ```bash
 python gams_trace.py parse /path/to/your/main.gms
-python gams_trace.py trace objective 1
+python gams_trace.py trace 1
 ```
 
 > If your codebase has nested includes, the script will follow `$include` and `$batinclude` relative to the root file’s directory.
@@ -287,4 +269,5 @@ While the script is standalone and doesn’t rely on external APIs, its logic mi
 > These references describe the constructs the parser targets and the conventions (e.g., `obj .. Z =e= expr;`) that let us identify and trace objective and constraints.
 
 *   GAMS documentation on data declarations and equations (Sets/Parameters/Tables/Variables/Equations; solves) explains how model components are defined and referenced, which is what we statically trace here (GAMS User’s Guide—Language Concepts, GAMS—Modeling Basics).
+
 

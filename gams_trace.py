@@ -890,12 +890,12 @@ def main():
         list_subs.add_parser(typ, help=f'List all {typ}')
 
     # trace subcommand
-    trace_sub = subparsers.add_parser('trace', help='Trace objective, symbols, or equations (excludes sets from output)')
-    trace_sub.add_argument('target', nargs=argparse.REMAINDER, help='Objective or symbol/equation name to trace; for objective, optional solve number follows')
+    trace_sub = subparsers.add_parser('trace', help='Trace objective (by solve number), symbols, or equations (excludes sets from output)')
+    trace_sub.add_argument('target', nargs=argparse.REMAINDER, help='Solve number (1+) for objective trace, or symbol/equation name to trace')
 
     # trace_with_sets subcommand
-    trace_with_sets_sub = subparsers.add_parser('trace_with_sets', help='Trace objective, symbols, or equations (includes sets in output)')
-    trace_with_sets_sub.add_argument('target', nargs=argparse.REMAINDER, help='Objective or symbol/equation name to trace; for objective, optional solve number follows')
+    trace_with_sets_sub = subparsers.add_parser('trace_with_sets', help='Trace objective (by solve number), symbols, or equations (includes sets in output)')
+    trace_with_sets_sub.add_argument('target', nargs=argparse.REMAINDER, help='Solve number (1+) for objective trace, or symbol/equation name to trace')
 
     # show subcommand
     show_sub = subparsers.add_parser('show', help='Show details of a specific solve (by number 1+) or symbol')
@@ -988,50 +988,39 @@ def main():
             exclude_sets = (args.subcommand == 'trace')
 
             target = args.target
-            if target and target[0].lower() == 'objective':
-                solve_num = int(target[1]) if len(target) > 1 else None
-                if solve_num is None:
-                    print("Available solves:")
-                    for idx, s in enumerate(solves, start=1):
-                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-                    while True:
-                        try:
-                            solve_num = int(input(f"Enter solve number (1-{len(solves)}): "))
-                            if 1 <= solve_num <= len(solves):
-                                break
-                        except ValueError:
-                            pass
-                else:
+            if target:
+                name = target[0]
+                try:
+                    solve_num = int(name)
+                    # Trace objective of this solve
                     if solve_num < 1 or solve_num > len(solves):
                         print("Invalid solve number. Available solves:")
                         for idx, s in enumerate(solves, start=1):
                             print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                         sys.exit(1)
-                target_solve = solves[solve_num - 1]
-                s, obj_def = extract_objective(symbols, target_solve)
-                if not s:
-                    print("No solve detected.")
-                else:
-                    print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
-                    if obj_def:
-                        kind_str = "equation" if obj_def.kind == 'equation' else 'assignment'
-                        print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
-                        print(obj_def.text.strip())
-                        print("\nTracing dependencies of the objective expression:")
-                        dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(obj_def.deps)}
-                        for dep_name, dep_sym in dep_symbols.items():
-                            if dep_name == s.objvar or (exclude_sets and dep_sym and dep_sym.stype == 'set'):
-                                continue
-                            print(f"- {dep_name}")
-                            for ln in trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets):
-                                print(ln)
+                    target_solve = solves[solve_num - 1]
+                    s, obj_def = extract_objective(symbols, target_solve)
+                    if not s:
+                        print("No solve detected.")
                     else:
-                        print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
-                print()
-            else:
-                # trace symbol or equation
-                name = target[0] if target else None
-                if name:
+                        print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
+                        if obj_def:
+                            kind_str = "equation" if obj_def.kind == 'equation' else 'assignment'
+                            print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
+                            print(obj_def.text.strip())
+                            print("\nTracing dependencies of the objective expression:")
+                            dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(obj_def.deps)}
+                            for dep_name, dep_sym in dep_symbols.items():
+                                if dep_name == s.objvar or (exclude_sets and dep_sym and dep_sym.stype == 'set'):
+                                    continue
+                                print(f"- {dep_name}")
+                                for ln in trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets):
+                                    print(ln)
+                        else:
+                            print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
+                    print()
+                except ValueError:
+                    # trace symbol or equation
                     if exclude_sets:
                         sym = symbols.get(name.lower())
                         if sym and sym.stype == 'set':
@@ -1046,9 +1035,9 @@ def main():
                         for ln in trace_symbol(symbols, name, exclude_sets=exclude_sets):
                             print(ln)
                         print()
-                else:
-                    print("Error: No target specified for trace.")
-                    sys.exit(1)
+            else:
+                print("Error: No target specified for trace.")
+                sys.exit(1)
 
         elif args.subcommand == 'show':
             target = args.target
