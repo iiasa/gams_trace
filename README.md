@@ -49,7 +49,7 @@ The `gams_trace.py` script:
 
 Running without arguments or passing `-h` or `--help` as a first arguement displays usage information. The first arguement selects a subcommand that invokes a particular script action. The subcommands are `parse`, `save`, `list`, `show`, `trace`, and `trace_with_sets`.
 
-## Parse
+### Parse
 
 First, parse the GAMS model (saves data to `gams_trace.parse`):
 
@@ -59,7 +59,7 @@ python gams_trace.py parse path/to/main.gms
 
 This parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
 
-## Save
+### Save
 
 After parsing, you can save the merged and decommented GAMS code:
 
@@ -69,7 +69,7 @@ python gams_trace.py save path/to/merged.gms
 
 This saves the merged decommented GAMS code (all `$include` and `$batinclude` files inlined, comments removed) to the specified output file for review.
 
-## List
+### List
 
 The `list` subcomments lists parsed symbols and solve statements. Without futher parameters, this subcommand displays a summary of symbol types and counts:
 
@@ -135,7 +135,7 @@ Detailed explanation:
 *   `list solves`:
     Lists parsd solve statements with index numbers.
 
-## Show
+### Show
 
 Shows the definition location, type, dimensions (if any), and first ≤5 lines of the declaration or definition for the specified symbol or solve statement. Works for any symbol type including thoe of unknown type. Solve statements are specified by an index number.
 
@@ -146,7 +146,7 @@ python gams_trace.py show MY_SYMBOL
 python gams_trace.py show SOLVE_INDEX_NUMBER
 ```
 
-## Trace
+### Trace
 
 The `trace` and `trace_with_sets` subcommands trace data/value dependencies. The former excludes sets from the tracing for brevity. Invocations:
 
@@ -180,7 +180,7 @@ Detailed explanation:
 
 ***
 
-### Example (mini demonstration)
+#### Example (trace mini demonstration)
 
 Suppose part of your GAMS code looks like:
 
