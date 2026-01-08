@@ -44,9 +44,12 @@ The `gams_trace.py` script:
 
 ***
 
+## Usage
+
+Running without arguments or passing `-h` or --help` as a first arguement displays usage information. The first arguement selects a subcommand that invokes a particular script action. The subcommands are `parse`, `save`, `list`, `show`, `trace`, and `trace_with_sets`.
+
 ## Parse
 
-Running without arguments displays usage information.
 
 First, parse the GAMS model (saves data to `gams_trace.parse`):
 
@@ -68,7 +71,7 @@ This saves the merged decommented GAMS code (all `$include` and `$batinclude` fi
 
 ## List
 
-Parsed symbols can be listed via the `list` subcommand. Without futher parameters, this subcommand displays a summary of symbol types and counts:
+The `list` subcomments lists parsed symbols and solve statements. Without futher parameters, this subcommand displays a summary of symbol types and counts:
 
 ```bash
 python gams_trace.py list
@@ -87,11 +90,10 @@ unknown: 254
 variables: 76
 ```
 
-To list the symbols of a given type invoke:
+To list the parsed symbols of a given type, invoke:
 
 ```bash
 python gams_trace.py list solves
-python gams_trace.py list solve 1
 python gams_trace.py list sets
 python gams_trace.py list parameters
 python gams_trace.py list scalars
@@ -101,51 +103,52 @@ python gams_trace.py list equations
 python gams_trace.py list unknowns
 ```
 
-Detailed explanation of symbol listing:
+To list parsed solve statements, invoke:
 
-*   `list solves`:
-    Lists all detected solve statements with IDs.
+```bash
+python gams_trace.py list solves
+```
 
-*   `list solve N`:
-    Shows details for the N-th solve statement: model name, solver, sense, objective variable, and file:line. Requires solve number.
+Detailed explanation:
 
 *   `list sets`:
-    Lists all defined sets (e.g., - Myset).
+    Lists all parsed sets alphabetically.
 
 *   `list parameters`:
-    Lists all defined parameters (e.g., - Myparam).
+    Lists all parsed parameters alphabetically.
 
 *   `list scalars`:
-    Lists all defined scalars (e.g., - Mysc).
+    Lists all parsed scalars alphabetically.
 
 *   `list tables`:
-    Lists all defined tables (e.g., - Mycost).
+    Lists all parsed tables alphabetically.
 
 *   `list variables`:
-    Lists all defined variables grouped by variable type (e.g., Free Variables: - X, - Y; Positive Variables: - Z).
+    Lists all parsed variables grouped by variable type (e.g., Free Variables: - X, - Y; Positive Variables: - Z).
 
 *   `list equations`:
-    Lists all defined equations (e.g., - Balance_eq).
+    Lists all parsed equations alphabetically.
 
 *   `list unknowns`:
-    Lists all symbols encountered that could not be classified or linked to declarations (e.g., - Unclassified_symbol).
+    Lists all symbols encountered that could not be classified or linked to declarations.
+
+*   `list solves`:
+    Lists all detected solve statements with index numbers.
 
 ## Show
 
-Shows the definition location, type, dimensions (if any), and first ≤5 lines of the declaration or definition for the specified symbol. Works for any symbol type including unknowns.
+Shows the definition location, type, dimensions (if any), and first ≤5 lines of the declaration or definition for the specified symbol or solve statement. Works for any symbol type including thoe of unknown type. Solve statements are specified by an index number.
 
- Note: Symbol name lookups (e.g., `list scalar w4`) are case-insensitive. The original case from the code is displayed in output.
+Note: Symbol name lookups are case-insensitive. The original case from the code is displayed in output.
 
-```
+```bash
 python gams_trace.py show MY_SYMBOL
+python gams_trace.py show SOLVE_INDEX_NUMBER
 ```
 
-*   `show MY_SYMBOL`:
-    
+## Trace
 
-## Trace Commands
-
-Trace dependencies (excluding sets by default):
+The `trace` and `trace_with_sets` subcommands trace dependencies. The former excludes sets from the tracing for brevity. Invocations:
 
 ```bash
 python gams_trace.py trace objective

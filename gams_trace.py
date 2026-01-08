@@ -208,7 +208,7 @@ def load_gms(root_path: str) -> List[LineEntry]:
                         if '..' in line:
                             # Check if previous merged entry is potential equation name (starts with word, no ;)
                             if (merged_lines and
-                                re.match(r'^\s*[A-Za-z_]', merged_lines[-1].text) and
+                                re.match(r'^\s*[A-Za-z]', merged_lines[-1].text) and
                                 ';' not in merged_lines[-1].text):
                                 name_entry = merged_lines.pop()
                                 equation_buff = [name_entry.text, line]
@@ -884,8 +884,6 @@ def main():
     list_sub = subparsers.add_parser('list', help='List solves, models, symbols, or specific details')
     list_subs = list_sub.add_subparsers(dest='list_command')
     list_subs.add_parser('solves', help='List all detected solve statements')
-    solve_sub = list_subs.add_parser('solve', help='Show details for a specific solve statement')
-    solve_sub.add_argument('solve_number', type=int, help='Solve number (1+)')
 
     # Symbol type commands: plural for list names
     for typ in ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']:
@@ -900,8 +898,8 @@ def main():
     trace_with_sets_sub.add_argument('target', nargs=argparse.REMAINDER, help='Objective or symbol/equation name to trace; for objective, optional solve number follows')
 
     # show subcommand
-    show_sub = subparsers.add_parser('show', help='Show details of a specific symbol')
-    show_sub.add_argument('symbol_name', help='Name of the symbol')
+    show_sub = subparsers.add_parser('show', help='Show details of a specific solve (by number 1+) or symbol')
+    show_sub.add_argument('target', help='Solve number (1+) or name of the symbol')
 
     args = ap.parse_args()
 
@@ -947,68 +945,47 @@ def main():
             files, symbols, models, solves = pickled_data
         print("Parsed data loaded from gams_trace.parse")
 
-        if args.subcommand == 'save':
-            # Save merged and decommented source
-            with open(args.output_file, 'w') as f:
-                for entry in files:
-                    f.write(entry.text + '\n')
-            print(f"Merged decommented source saved to {args.output_file}")
-
-        elif args.subcommand == 'list':
+        if args.subcommand == 'list':
             if args.list_command == 'solves':
                 print("Solve statements:")
                 for idx, s in enumerate(solves, start=1):
                     print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
                 print()
-            elif args.list_command == 'solve':
-                solve_num = args.solve_number
-                if solve_num < 1 or solve_num > len(solves):
-                    print("Invalid solve number. Available solves:")
-                    for idx, s in enumerate(solves, start=1):
-                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-                    sys.exit(1)
-                selected_solve = solves[solve_num - 1]
-                print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
-                print()
             else:
-                if args.list_command is None:
-                    # Show summary
-                    print("Parsed symbols summary:")
-                    print_symbols_histogram(symbols)
-                    sys.exit(0)
-                # Handle symbol type lists
-                plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
-                if args.list_command in plural_types:
-                    stype = args.list_command[:-1]  # Remove 's' to get singular stype
-                    if stype == 'variable':
-                        # Special handling for variables: group by type
-                        vtypes = defaultdict(list)
-                        for sym in symbols.values():
-                            if sym.stype == 'variable':
-                                vtype_str = sym.vtype or "UNKNOWN"
-                                vtypes[vtype_str].append(sym.original)
-                        for vtype in sorted(vtypes):
-                            print(f"{vtype} Variables:")
-                            for name in sorted(vtypes[vtype]):
-                                print(f"- {name}")
+                    if args.list_command is None:
+                        # Show summary
+                        print("Parsed symbols summary:")
+                        print_symbols_histogram(symbols)
+                        sys.exit(0)
+            # Handle symbol type lists
+            plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
+            if args.list_command in plural_types:
+                stype = args.list_command[:-1]  # Remove 's' to get singular stype
+                if stype == 'variable':
+                    # Special handling for variables: group by type
+                    vtypes = defaultdict(list)
+                    for sym in symbols.values():
+                        if sym.stype == 'variable':
+                            vtype_str = sym.vtype or "UNKNOWN"
+                            vtypes[vtype_str].append(sym.original)
+                    for vtype in sorted(vtypes):
+                        print(f"{vtype} Variables:")
+                        for name in sorted(vtypes[vtype]):
+                            print(f"- {name}")
+                        print()
+                else:
+                    names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
+                    if names:
+                        print(f"{stype.title()}s:")
+                        for name in names:
+                            print(f"- {name}")
                         print()
                     else:
-                        names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
-                        if names:
-                            print(f"{stype.title()}s:")
-                            for name in names:
-                                print(f"- {name}")
-                            print()
-                        else:
-                            print(f"No {stype}s found.")
-                            print()
+                        print(f"No {stype}s found.")
+                        print()
 
-        elif args.subcommand == 'trace':
-            exclude_sets = True
-        elif args.subcommand == 'trace_with_sets':
-            exclude_sets = False
-
-        if args.subcommand in ['trace', 'trace_with_sets']:
+        elif args.subcommand == 'trace' or args.subcommand == 'trace_with_sets':
+            exclude_sets = (args.subcommand == 'trace')
 
             target = args.target
             if target and target[0].lower() == 'objective':
@@ -1074,52 +1051,65 @@ def main():
                     sys.exit(1)
 
         elif args.subcommand == 'show':
-            symbol_name = args.symbol_name
-            sym = symbols.get(symbol_name.lower()) if symbol_name else None
-            if sym:
-                # Show definition or declaration
-                d = None
-                loc = None
-                text = None
-                if sym.defs:
-                    d = sym.defs[0]  # Take first definition
-                    loc = d.loc
-                    text = d.text
-                elif sym.decls:
-                    d = sym.decls[0]  # Take first declaration
-                    loc = d.loc
-                    text = d.text
-                if loc:
-                    if sym.stype == 'variable':
-                        print(f"Variable {sym.original} ({sym.vtype}) declared at {loc.file}:{loc.line}")
-                    elif sym.stype == 'unknown':
-                        print(f"Unknown symbol {sym.original} last referenced at {loc.file}:{loc.line}")
+            target = args.target
+            try:
+                solve_num = int(target)
+                if solve_num < 1 or solve_num > len(solves):
+                    print("Invalid solve number. Available solves:")
+                    for idx, s in enumerate(solves, start=1):
+                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                    sys.exit(1)
+                selected_solve = solves[solve_num - 1]
+                print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
+                print()
+            except ValueError:
+                # symbol
+                symbol_name = target
+                sym = symbols.get(symbol_name.lower()) if symbol_name else None
+                if sym:
+                    # Show definition or declaration
+                    d = None
+                    loc = None
+                    text = None
+                    if sym.defs:
+                        d = sym.defs[0]  # Take first definition
+                        loc = d.loc
+                        text = d.text
+                    elif sym.decls:
+                        d = sym.decls[0]  # Take first declaration
+                        loc = d.loc
+                        text = d.text
+                    if loc:
+                        if sym.stype == 'variable':
+                            print(f"Variable {sym.original} ({sym.vtype}) declared at {loc.file}:{loc.line}")
+                        elif sym.stype == 'unknown':
+                            print(f"Unknown symbol {sym.original} last referenced at {loc.file}:{loc.line}")
+                        else:
+                            print(f"{sym.stype.title()} {sym.original} declared at {loc.file}:{loc.line}")
+                        if sym.dims:
+                            print(f"Dimensions: {', '.join(sym.dims)}")
+                        if sym.stype == 'set' and sym.base_set:
+                            base_sym = symbols.get(sym.base_set.lower())
+                            if base_sym:
+                                print(f"This set is an alias for {base_sym.original}.")
+                        # Show first <=5 lines of text
+                        if text:
+                            lines = text.strip().split('\n')
+                            for i in range(min(5, len(lines))):
+                                print(lines[i])
+                            if len(lines) > 5:
+                                print("(...)")
                     else:
-                        print(f"{sym.stype.title()} {sym.original} declared at {loc.file}:{loc.line}")
-                    if sym.dims:
-                        print(f"Dimensions: {', '.join(sym.dims)}")
-                    if sym.stype == 'set' and sym.base_set:
-                        base_sym = symbols.get(sym.base_set.lower())
-                        if base_sym:
-                            print(f"This set is an alias for {base_sym.original}.")
-                    # Show first <=5 lines of text
-                    if text:
-                        lines = text.strip().split('\n')
-                        for i in range(min(5, len(lines))):
-                            print(lines[i])
-                        if len(lines) > 5:
-                            print("(...)")
+                        if sym.stype == 'variable':
+                            print(f"Variable {sym.original} ({sym.vtype}) has no parsed definitions or declarations.")
+                        elif sym.stype == 'unknown':
+                            print(f"Unknown symbol {sym.original} has no parsed definitions or declarations.")
+                        else:
+                            print(f"{sym.stype.title()} {sym.original} has no parsed definitions or declarations.")
+                    print()
                 else:
-                    if sym.stype == 'variable':
-                        print(f"Variable {sym.original} ({sym.vtype}) has no parsed definitions or declarations.")
-                    elif sym.stype == 'unknown':
-                        print(f"Unknown symbol {sym.original} has no parsed definitions or declarations.")
-                    else:
-                        print(f"{sym.stype.title()} {sym.original} has no parsed definitions or declarations.")
-                print()
-            else:
-                print(f"Symbol '{symbol_name}' not found in parsed data.")
-                print()
+                    print(f"Symbol '{symbol_name}' not found in parsed data.")
+                    print()
 
 if __name__ == '__main__':
     main()
