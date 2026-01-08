@@ -913,24 +913,7 @@ def main():
     models = None
     solves = None
 
-    if args.subcommand == 'save':
-        # Save merged and decommented source
-        if not os.path.exists('gams_trace.parse'):
-            print("Error: gams_trace.parse does not exist. Run 'parse <gms_file>' first.")
-            sys.exit(1)
-        with open('gams_trace.parse', 'rb') as f:
-            pickled_data = pickle.load(f)
-            if len(pickled_data) != 4:
-                print("Error: Invalid pickle format. Run 'parse <gms_file>' first to regenerate.")
-                sys.exit(1)
-            files, _, _, _ = pickled_data
-
-        with open(args.output_file, 'w') as f:
-            for entry in files:
-                f.write(entry.text + '\n')
-        print(f"Merged decommented source saved to {args.output_file}")
-
-    elif args.subcommand == 'parse':
+    if args.subcommand == 'parse':
         # Parse from root
         try:
             files = load_gms(args.gms_file)
@@ -940,7 +923,7 @@ def main():
 
         symbols, models, solves = parse_code(files)
 
-        # Serialize
+        # Save parse pickle
         pickled_data = (files, symbols, models, solves)
         with open('gams_trace.parse', 'wb') as f:
             pickle.dump(pickled_data, f)
@@ -951,7 +934,7 @@ def main():
         print_symbols_histogram(symbols)
 
     else:
-        # load from pickle
+        # Load parse pickle
         if not os.path.exists('gams_trace.parse'):
             print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with 'parse <gms_file>' first.")
             sys.exit(1)
@@ -963,7 +946,14 @@ def main():
             files, symbols, models, solves = pickled_data
         print("Parsed data loaded from gams_trace.parse")
 
-        if args.subcommand == 'list':
+        if args.subcommand == 'save':
+            # Save merged and decommented source
+            with open(args.output_file, 'w') as f:
+                for entry in files:
+                    f.write(entry.text + '\n')
+            print(f"Merged decommented source saved to {args.output_file}")
+
+        elif args.subcommand == 'list':
             if args.list_command == 'solves':
                 print("Solve statements:")
                 for idx, s in enumerate(solves, start=1):
@@ -1127,4 +1117,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
