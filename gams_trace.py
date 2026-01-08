@@ -314,10 +314,10 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         if am:
             base = am.group(1).strip()
             aliases_str = am.group(2)
-            alias_list = [a.strip().lower() for a in aliases_str.split(',') if a.strip()]
+            alias_list = [a.strip() for a in aliases_str.split(',') if a.strip()]
             base_lower = base.lower()
             for a in alias_list:
-                sym = ensure_symbol(a.lower(), 'set')
+                sym = ensure_symbol(a, 'set')
                 sym.base_set = base_lower
                 sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
             i += 1
