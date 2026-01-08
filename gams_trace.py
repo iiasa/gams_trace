@@ -857,6 +857,17 @@ def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str, exclude_sets:
 # CLI
 # ----------------------------
 
+def print_symbols_histogram(symbols):
+    stype_counts = defaultdict(int)
+    for sym in symbols.values():
+        stype_counts[sym.stype] += 1
+    expected_stypes = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknown']
+    all_stypes = expected_stypes + [s for s in stype_counts if s not in expected_stypes]
+    for stype in sorted(all_stypes):
+        plural_stype = stype + "s" if stype not in ("solves", "unknown") else stype
+        count = stype_counts.get(stype, 0)
+        print(f"{plural_stype}: {count}")
+
 def main():
     ap = argparse.ArgumentParser(description="Trace raw data sources in a GAMS model. Use subcommands: parse to load, list to list solves/solve, trace/trace_with_sets for tracing.")
     subparsers = ap.add_subparsers(dest='subcommand', help='Available subcommands')
@@ -936,16 +947,8 @@ def main():
         print("\rParsing complete, saved parse tree to gams_trace.parse", flush=True)
 
         # Print summary
-        stype_counts = defaultdict(int)
-        for sym in symbols.values():
-            stype_counts[sym.stype] += 1
         print(f"solves: {len(solves)}")
-        expected_stypes = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknown']
-        all_stypes = expected_stypes + [s for s in stype_counts if s not in expected_stypes]
-        for stype in sorted(all_stypes):
-            plural_stype = stype + "s" if stype not in ("solves", "unknown") else stype
-            count = stype_counts.get(stype, 0)
-            print(f"{plural_stype}: {count}")
+        print_symbols_histogram(symbols)
 
     else:
         # load from pickle
@@ -980,11 +983,7 @@ def main():
                 if args.list_command is None:
                     # Show summary
                     print("Parsed symbols summary:")
-                    stype_counts = defaultdict(int)
-                    for sym in symbols.values():
-                        stype_counts[sym.stype] += 1
-                    for stype, count in sorted(stype_counts.items()):
-                        print(f"{stype}: {count}")
+                    print_symbols_histogram(symbols)
                     sys.exit(0)
                 # Handle symbol type lists
                 plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
@@ -1128,3 +1127,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
