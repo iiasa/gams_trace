@@ -926,8 +926,9 @@ def main():
         # Save parse pickle
         pickled_data = (files, symbols, models, solves)
         with open(PARSE_PICKLE_FILE, 'wb') as f:
+            print("\rSaving parse data...                                            ", end='', flush=True)
             pickle.dump(pickled_data, f)
-        print(f"\rParsing complete, saved parse tree to {PARSE_PICKLE_FILE}", flush=True)
+        print(f"\rParsing complete, saved parse tree to {PARSE_PICKLE_FILE}")
 
         # Print summary
         print(f"solves: {len(solves)}")
@@ -936,10 +937,10 @@ def main():
     else:
         # Load parse pickle
         if not os.path.exists(PARSE_PICKLE_FILE):
-            print("Error: Parsed data file 'gams_trace.parse' does not exist. Run with 'parse <gms_file>' first.")
+            print("Error: Parse data file 'gams_trace.parse' does not exist. Run with 'parse <gms_file>' first.")
             sys.exit(1)
         with open(PARSE_PICKLE_FILE, 'rb') as f:
-            print(f"Loading parse data...", end='', flush=True)
+            print("Loading parse data...", end='', flush=True)
             pickled_data = pickle.load(f)
             if len(pickled_data) != 4:
                 print(f"\rError: {PARSE_PICKLE_FILE} is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
