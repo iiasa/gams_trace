@@ -1,3 +1,5 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 The `gams_trace.py` script:
 
 *   Recursively loads your GAMS sources and resolves `$include` / `$batinclude`
