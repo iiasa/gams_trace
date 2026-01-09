@@ -138,7 +138,7 @@ def load_gms(root_path: str) -> List[LineEntry]:
             raise IncludeError(f"Recursion depth exceeded: {fp}", include_file=fp, include_loc=None)
 
         full = os.path.abspath(fp)
-        status_msg = f"Loading: {os.path.basename(full)} ({len(merged_lines)} lines)                "
+        status_msg = f"Loading: {os.path.basename(full)} ({len(merged_lines)} lines)                          "
         print(f"\r{status_msg}", end="", flush=True)
 
         try:
@@ -352,7 +352,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     i += 1
                     continue
             # Check for multi-line variable declaration
-            if 'variables' in line.lower() and not line.strip().endswith(';'):
+            if 'variable' in line.lower() and not line.strip().endswith(';'):
                 accumulated = line
                 j = i + 1
                 while j < len(entries):
