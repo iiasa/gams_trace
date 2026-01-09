@@ -13,6 +13,7 @@ The `gams_trace.py` script:
 > The parser is not a full GAMS parser, the script does not compile nor execute GAMS code. Hence:
 > - Conditional code execution is not resolved when tracing.
 > - Exceptional GAMS syntax constructs will be handled incorrectly.
+> - Comments starting with !! (end-of-line comments) are stripped as they are handled as mandatory in GAMS.
 > - Results should be taken with a grain of salt: useful for exploration and discovery, not useful for obtaining hard truth.
 
 ***
@@ -81,6 +82,7 @@ Example output:
 ```
 Parsed data loaded from gams_trace.parse
 Parsed symbols summary:
+solves: 11
 equations: 73
 parameters: 1370
 scalars: 9

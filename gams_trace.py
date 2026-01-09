@@ -150,15 +150,17 @@ def load_gms(root_path: str) -> List[LineEntry]:
         lines = []
         in_comment = False
         for raw_line in raw_lines:
-            stripped = raw_line.strip().lower()
+            # First, strip GAMS end-of-line comments (!!)
+            processed_line = raw_line.split('!!')[0]
+            stripped = processed_line.strip().lower()
             if stripped == '$ontext':
                 in_comment = True
             elif stripped == '$offtext':
                 in_comment = False
-            if raw_line.strip().startswith('*') or in_comment or stripped in ['$ontext', '$offtext']:
+            if processed_line.strip().startswith('*') or in_comment or stripped in ['$ontext', '$offtext']:
                 lines.append('')  # Empty line to preserve line numbers
             else:
-                lines.append(raw_line.rstrip('\n'))
+                lines.append(processed_line.rstrip('\n'))
 
         # Process lines, handling includes inline and merging equation lines
         line_num = 1
@@ -746,7 +748,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
 
         i += 1
 
-    return symbols, models, solves
+    return symbols, models, solves, aliases
 
 # ----------------------------
 # Tracing utilities
@@ -921,10 +923,10 @@ def main():
             print(f"Error loading files: {e}")
             sys.exit(1)
 
-        symbols, models, solves = parse_code(files)
+        symbols, models, solves, aliases = parse_code(files)
 
         # Save parse pickle
-        pickled_data = (files, symbols, models, solves)
+        pickled_data = (files, symbols, models, solves, aliases)
         with open(PARSE_PICKLE_FILE, 'wb') as f:
             print("\rSaving parse data...                                            ", end='', flush=True)
             pickle.dump(pickled_data, f)
@@ -942,11 +944,11 @@ def main():
         with open(PARSE_PICKLE_FILE, 'rb') as f:
             print("Loading parse data...", end='', flush=True)
             pickled_data = pickle.load(f)
-            if len(pickled_data) != 4:
+            if len(pickled_data) != 5:
                 print(f"\rError: {PARSE_PICKLE_FILE} is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
                 sys.exit(1)
-            print(f"\rParse data loaded from {PARSE_PICKLE_FILE}.")
-            files, symbols, models, solves = pickled_data
+            print(f"\rParse data loaded from {PARSE_PICKLE_FILE}")
+            files, symbols, models, solves, aliases = pickled_data
 
         if args.subcommand == 'list':
             if args.list_command == 'solves':
