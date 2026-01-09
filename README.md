@@ -13,7 +13,7 @@ The `gams_trace.py` script:
 > The parser is not a full GAMS parser, the script does not compile nor execute GAMS code. Hence:
 > - Conditional code execution is not resolved when tracing.
 > - Exceptional GAMS syntax constructs will be handled incorrectly.
-> - Comments starting with !! (end-of-line comments) are stripped as they are handled as mandatory in GAMS.
+> - Non-default comment delimiters are not recognized.
 > - Results should be taken with a grain of salt: useful for exploration and discovery, not useful for obtaining hard truth.
 
 ***
@@ -22,7 +22,7 @@ The `gams_trace.py` script:
 
 **Capabilities** (static analysis):
 
-*   **Includes:** Recursively resolves `$include` and `$batinclude`, inlining the included file contents at the point of inclusion (matching GAMS compilation behavior). Allows multiple inclusions of the same file. Ignores comments (* lines and $ontext/$offtext blocks) during parsing to avoid interference with code analysis. Excludes .csv files bracketed in $ondelim/$offdelim. For $batinclude, handles argument substitution (e.g., `%1%` replaced with first argument).
+*   **Includes:** Recursively resolves `$include` and `$batinclude`, inlining the included file contents at the point of inclusion (matching GAMS compilation behavior). Allows multiple inclusions of the same file. Ignores comments (`*` lines, `!!` end-of-line commants, and `$ontext`/`$offtext` blocks) during parsing to avoid interference with code analysis. Excludes .csv files bracketed in $ondelim/$offdelim. For $batinclude, handles argument substitution (e.g., `%1%` replaced with first argument).
 *   **Declaration Parsing:** Handles multi-line declarations for parameters, scalars, and sets interrupted by comments or whitespace, but stops accumulation when encountering execution statements (e.g., LOOP, IF) even without semicolons, following GAMS rules that declarations may not contain flow-control blocks.
 *   **Line Tracking:** Maintains original source file and line number for every line in the merged code, ensuring accurate source attribution in output.
 *   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
