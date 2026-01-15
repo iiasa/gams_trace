@@ -127,6 +127,9 @@ def find_idents(expr: str) -> Set[str]:
 # Loader: read root and resolve includes
 # ----------------------------
 
+def extract_visited_files(files: List[LineEntry]) -> Set[str]:
+    return set(e.file for e in files)
+
 
 def load_gms(root_path: str) -> List[LineEntry]:
     """Return list of line entries with original file and line number in merged include order."""
@@ -892,6 +895,9 @@ def main():
     for typ in ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']:
         list_subs.add_parser(typ, help=f'List all {typ}')
 
+    # files subcommand
+    list_subs.add_parser('files', help='List all unique included file paths')
+
     # trace subcommand
     trace_sub = subparsers.add_parser('trace', help='Trace objective (by solve number), symbols, or equations (excludes sets from output)')
     trace_sub.add_argument('target', nargs=argparse.REMAINDER, help='Solve number (1+) for objective trace, or symbol/equation name to trace')
@@ -933,6 +939,7 @@ def main():
         print(f"\rParsing complete, saved parse tree to {PARSE_PICKLE_FILE}")
 
         # Print summary
+        print(f"files: {len(extract_visited_files(files))}")
         print(f"solves: {len(solves)}")
         print_symbols_histogram(symbols)
 
@@ -949,17 +956,22 @@ def main():
                 sys.exit(1)
             print(f"\rParse data loaded from {PARSE_PICKLE_FILE}")
             files, symbols, models, solves, aliases = pickled_data
+            visited_files = extract_visited_files(files)
 
         if args.subcommand == 'list':
             if args.list_command == 'solves':
                 print("Solve statements:")
                 for idx, s in enumerate(solves, start=1):
                     print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
-                print()
+            elif args.list_command == 'files':
+                print("Included files:")
+                for f in sorted(visited_files):
+                    print(f)
             else:
                     if args.list_command is None:
                         # Show summary
                         print("Parsed symbols summary:")
+                        print(f"files: {len(visited_files)}")
                         print_symbols_histogram(symbols)
                         sys.exit(0)
             # Handle symbol type lists
@@ -976,18 +988,15 @@ def main():
                     for vtype in sorted(vtypes):
                         print(f"{vtype} Variables:")
                         for name in sorted(vtypes[vtype]):
-                            print(f"- {name}")
-                        print()
+                            print(name)
                 else:
                     names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
                     if names:
                         print(f"{stype.title()}s:")
                         for name in names:
-                            print(f"- {name}")
-                        print()
+                            print(name)
                     else:
                         print(f"No {stype}s found.")
-                        print()
 
         elif args.subcommand == 'trace' or args.subcommand == 'trace_with_sets':
             exclude_sets = (args.subcommand == 'trace')
@@ -1018,12 +1027,11 @@ def main():
                             for dep_name, dep_sym in dep_symbols.items():
                                 if dep_name == s.objvar or (exclude_sets and dep_sym and dep_sym.stype == 'set'):
                                     continue
-                                print(f"- {dep_name}")
+                                print(dep_name)
                                 for ln in trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets):
                                     print(ln)
                         else:
                             print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
-                    print()
                 except ValueError:
                     # trace symbol or equation
                     if exclude_sets:
@@ -1035,11 +1043,9 @@ def main():
                     if sym and sym.stype == 'equation':
                         for ln in explain_equation(symbols, name, exclude_sets=exclude_sets):
                             print(ln)
-                        print()
                     else:
                         for ln in trace_symbol(symbols, name, exclude_sets=exclude_sets):
                             print(ln)
-                        print()
             else:
                 print("Error: No target specified for trace.")
                 sys.exit(1)
@@ -1055,7 +1061,6 @@ def main():
                     sys.exit(1)
                 selected_solve = solves[solve_num - 1]
                 print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
-                print()
             except ValueError:
                 # symbol
                 symbol_name = target
@@ -1100,10 +1105,8 @@ def main():
                             print(f"Unknown symbol {sym.original} has no parsed definitions or declarations.")
                         else:
                             print(f"{sym.stype.title()} {sym.original} has no parsed definitions or declarations.")
-                    print()
                 else:
                     print(f"Symbol '{symbol_name}' not found in parsed data.")
-                    print()
 
 if __name__ == '__main__':
     main()

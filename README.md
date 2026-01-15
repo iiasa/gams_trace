@@ -22,7 +22,7 @@ The `gams_trace.py` script:
 
 **Capabilities** (static analysis):
 
-*   **Includes:** Recursively resolves `$include` and `$batinclude`, inlining the included file contents at the point of inclusion (matching GAMS compilation behavior). Allows multiple inclusions of the same file. Ignores comments (`*` lines, `!!` end-of-line commants, and `$ontext`/`$offtext` blocks) during parsing to avoid interference with code analysis. Excludes .csv files bracketed in $ondelim/$offdelim. For $batinclude, handles argument substitution (e.g., `%1%` replaced with first argument).
+*   **Includes:** Recursively resolves `$include` and `$batinclude`, inlining the included file contents at the point of inclusion (matching GAMS compilation behavior). Allows multiple inclusions of the same file. Ignores comments (`*` lines, `!!` end-of-line comments, and `$ontext`/`$offtext` blocks) during parsing to avoid interference with code analysis. Excludes `.csv` files bracketed in `$ondelim`/`$offdelim`. For $batinclude, handles argument substitution (e.g., `%1%` replaced with first argument).
 *   **Declaration Parsing:** Handles multi-line declarations for parameters, scalars, and sets interrupted by comments or whitespace, but stops accumulation when encountering execution statements (e.g., LOOP, IF) even without semicolons, following GAMS rules that declarations may not contain flow-control blocks.
 *   **Line Tracking:** Maintains original source file and line number for every line in the merged code, ensuring accurate source attribution in output.
 *   **GDX Loading:** Parses `$GDXIN`, `$LOAD`, and `$LOADDC` statements, recording symbol origins from external GDX files.
@@ -58,7 +58,7 @@ First, parse the GAMS model (saves data to `gams_trace.parse`):
 python gams_trace.py parse path/to/main.gms
 ```
 
-This parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
+This parses the provided root and included `.gms` files for solve statements (any solver), saves parsed data to `gams_trace.parse`, and lists aggregate counts of files, solves and symbols (including unidentified symbols); detailed solve information is persisted in `gams_trace.solves`.
 
 ### Save
 
@@ -82,6 +82,7 @@ Example output:
 ```
 Parsed data loaded from gams_trace.parse
 Parsed symbols summary:
+files: 11
 solves: 11
 equations: 73
 parameters: 1370
@@ -92,9 +93,10 @@ unknown: 254
 variables: 76
 ```
 
-To list all parsed symbols of a given type, invoke:
+To list all parsed symbols of a given type or files, invoke:
 
 ```bash
+python gams_trace.py list files
 python gams_trace.py list solves
 python gams_trace.py list sets
 python gams_trace.py list parameters
@@ -133,6 +135,9 @@ Detailed explanation:
 
 *   `list unknowns`:
     Lists parsed symbols of unknown: encountered but could not be classified or linked to declarations.
+
+*   `list files`:
+    Lists all unique included file paths (including the root script) alphabetically.
 
 *   `list solves`:
     Lists parsd solve statements with index numbers.
