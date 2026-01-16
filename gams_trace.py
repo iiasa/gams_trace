@@ -28,7 +28,7 @@ PARSE_PICKLE_FILE = os.path.splitext(os.path.basename(__file__))[0] + ".parse"
 
 @dataclass
 class SourceLoc:
-    file: str
+    file_index: int
     line: int
 
 @dataclass
@@ -70,7 +70,7 @@ class SolveInfo:
 @dataclass
 class LineEntry:
     text: str
-    file: str
+    file_index: int
     line: int
 
 # ----------------------------
@@ -86,7 +86,7 @@ INCLUDE_RE = re.compile(r"^\s*\$(bat)?include\s+(.+)", re.IGNORECASE | re.DOTALL
 GDXIN_RE = re.compile(r"^\s*\$gdxin\s+(.+)", re.IGNORECASE | re.DOTALL)
 LOAD_RE = re.compile(r"^\s*\$load\s+(.+)", re.IGNORECASE | re.DOTALL)
 LOADDC_RE = re.compile(r"^\s*\$loaddc\s+(.+)", re.IGNORECASE | re.DOTALL)
-SOLVE_RE = re.compile(r"^\s*solve\s+(\w+)\s+using\s+(\w+)\s+(minimizing|minimising|maximizing|maximising)\s+(\w+)", re.IGNORECASE | re.DOTALL)
+SOLVE_RE = re.compile(r'^\s*solve\s+(\w+)\s+(?:using\s+(\w+)\s+(minimiz|maximiz|minimis|maximis)(ing|ising)\s+(\w+)|(minimiz|maximiz|minimis|maximis)(ing|ising)\s+(\w+)\s+using\s+(\w+))', re.IGNORECASE)
 MODEL_RE = re.compile(r"model\s+(\w+)\s*/\s*([^/]*)/\s*;", re.IGNORECASE | re.DOTALL)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)(\s*\([^)]*\))?\s*=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
 EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*\.\.\s*(.+?)\s*=(l|L|e|E|g|G)=\s*(.+?);\s*$", re.IGNORECASE | re.DOTALL)
@@ -127,20 +127,22 @@ def find_idents(expr: str) -> Set[str]:
 # Loader: read root and resolve includes
 # ----------------------------
 
-def extract_visited_files(files: List[LineEntry]) -> Set[str]:
-    return set(e.file for e in files)
-
-
-def load_gms(root_path: str) -> List[LineEntry]:
+def load_gms(root_path: str) -> Tuple[List[LineEntry], List[str]]:
     """Return list of line entries with original file and line number in merged include order."""
     merged_lines: List[LineEntry] = []
     base_dir = os.path.dirname(os.path.abspath(root_path))
+    files_list: List[str] = []
+    file_to_index: Dict[str, int] = {}
 
     def load_file(fp: str, depth: int = 0) -> None:
+        full = os.path.abspath(fp)
+        if full not in file_to_index:
+            file_to_index[full] = len(files_list)
+            files_list.append(full)
+        file_index = file_to_index[full]
         if depth > 100:
             raise IncludeError(f"Recursion depth exceeded: {fp}", include_file=fp, include_loc=None)
 
-        full = os.path.abspath(fp)
         status_msg = f"Loading: {os.path.basename(full)} ({len(merged_lines)} lines)                          "
         print(f"\r{status_msg}", end="", flush=True)
 
@@ -191,7 +193,7 @@ def load_gms(root_path: str) -> List[LineEntry]:
                     inc_path = inc_path.strip('"\'').replace('%X%', '/').replace('%REGION%', REGION)
                     if inc_path.lower().endswith('.csv'):
                         # Add the $include line for CSV (not processed inline)
-                        merged_lines.append(LineEntry(text=line, file=full, line=line_num))
+                        merged_lines.append(LineEntry(text=line, file_index=file_index, line=line_num))
                     else:
                         is_bat = m.group(1) is not None
                         if is_bat:
@@ -224,14 +226,14 @@ def load_gms(root_path: str) -> List[LineEntry]:
                                 equation_line_num = line_num
                             equation_accumulating = True
                         else:
-                            merged_lines.append(LineEntry(text=line, file=full, line=line_num))
+                            merged_lines.append(LineEntry(text=line, file_index=file_index, line=line_num))
                     else:
                         # Accumulating an equation
                         equation_buff.append(line)
                         if line.strip().endswith(';'):
                             # End of equation
                             merged_text = '\n'.join(equation_buff)
-                            merged_lines.append(LineEntry(text=merged_text, file=full, line=equation_line_num))
+                            merged_lines.append(LineEntry(text=merged_text, file_index=file_index, line=equation_line_num))
                             equation_accumulating = False
                             equation_buff = []
                             equation_line_num = 1  # Reset
@@ -240,13 +242,13 @@ def load_gms(root_path: str) -> List[LineEntry]:
             # If end of file and still accumulating, close it (though equations should end with ;)
             if i == len(lines) and equation_accumulating:
                 merged_text = '\n'.join(equation_buff)
-                merged_lines.append(LineEntry(text=merged_text, file=full, line=equation_line_num))
+                merged_lines.append(LineEntry(text=merged_text, file_index=file_index, line=equation_line_num))
                 equation_accumulating = False
                 equation_buff = []
 
     load_file(root_path, 0)
     print(f"\rLoaded {len(merged_lines)} lines from included files.{'                                    '}", flush=True)
-    return merged_lines
+    return merged_lines, files_list
 
 # ----------------------------
 # Parser
@@ -310,7 +312,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             symbols_list = [s.strip() for s in lm.group(1).strip().split(',') if s.strip()]
             for sym_name in symbols_list:
                 sym = ensure_symbol(sym_name, 'unknown')
-                sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
+                sym.defs.append(Definition(kind='gdx_load', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line), deps=set(), lhs=sym_name.lower(), gdx_file=current_gdx_file))
             i += 1
             continue
 
@@ -324,7 +326,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             for a in alias_list:
                 sym = ensure_symbol(a, 'set')
                 sym.base_set = base_lower
-                sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
             i += 1
             continue
 
@@ -351,7 +353,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                         sym = ensure_symbol(name, 'variable')
                         if sym.vtype is None:
                             sym.vtype = var_type
-                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
                     i += 1
                     continue
             # Check for multi-line variable declaration
@@ -384,7 +386,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                                             sym = ensure_symbol(name, 'variable')
                                             if sym.vtype is None:
                                                 sym.vtype = var_type
-                                            sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(entries[j].file, entries[j].line)))
+                                            sym.decls.append(Definition(kind='declaration', text=accumulated, loc=SourceLoc(entries[j].file_index, entries[j].line)))
                         i = j
                         break
                     j += 1
@@ -466,7 +468,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             except ValueError:
                                 pass
                         r += 1
-                defn = Definition(kind='table', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=set(), values=values, skipped=skipped)
+                defn = Definition(kind='table', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line), deps=set(), values=values, skipped=skipped)
                 sym.defs.append(defn)
                 i = j
                 continue
@@ -501,7 +503,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             dims = [d.strip() for d in dims_str.split(',') if d.strip()]
                         sym = ensure_symbol(name, stype)
                         sym.dims = dims
-                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
                         names = [name]  # for multi-line compatibility
                         # For sets, check if data is loaded from CSV
                         k = i
@@ -537,7 +539,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     if m:
                         name = m.group(1)
                         sym = ensure_symbol(name, stype)
-                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        sym.decls.append(Definition(kind='declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
             # For parameters, scalars, and sets, handle multi-line declarations
             if stype in ['parameter', 'scalar', 'set']:
                 if not line.strip().endswith(';'):
@@ -577,7 +579,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             if param_name and param_name.lower() not in accumulated_names:
                                 accumulated_names.add(param_name.lower())
                                 psym = ensure_symbol(param_name, stype)
-                                psym.decls.append(Definition(kind='declaration', text=entries[j].text, loc=SourceLoc(entries[j].file, entries[j].line)))
+                                psym.decls.append(Definition(kind='declaration', text=entries[j].text, loc=SourceLoc(entries[j].file_index, entries[j].line)))
                                 psym.dims = dims
                         # Check for end of block after parsing
                         if ';' in l2:
@@ -631,7 +633,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     if model_match:
                         mname = model_match.group(1)
                         eqs = [e.strip() for e in model_match.group(2).split(',') if e.strip()]
-                        models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
+                        models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file_index, entries[i].line)))
                     i = j
                     break
                 j += 1
@@ -643,7 +645,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         if mm:
             mname = mm.group(1)
             eqs = [e.strip() for e in mm.group(2).split(',') if e.strip()]
-            models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file, entries[i].line)))
+            models.append(ModelInfo(name=mname, equations=eqs, loc=SourceLoc(entries[i].file_index, entries[i].line)))
             i += 1
             continue
 
@@ -651,10 +653,21 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         sm = SOLVE_RE.search(line)
         if sm:
             model = sm.group(1)
-            solver = sm.group(2)
-            sense = sm.group(3).lower()
-            objvar = sm.group(4).strip()
-            solves.append(SolveInfo(model=model, solver=solver, sense=sense, objvar=objvar, loc=SourceLoc(entries[i].file, entries[i].line)))
+            if sm.group(2) is not None:
+                # First alternative: using solver sense objvar
+                solver = sm.group(2)
+                sense_base = sm.group(3)
+                sense_suffix = sm.group(4)
+                sense = (sense_base + sense_suffix).lower()
+                objvar = sm.group(5).strip()
+            else:
+                # Second alternative: sense objvar using solver
+                sense_base = sm.group(6)
+                sense_suffix = sm.group(7)
+                sense = (sense_base + sense_suffix).lower()
+                objvar = sm.group(8).strip()
+                solver = sm.group(9)
+            solves.append(SolveInfo(model=model, solver=solver, sense=sense, objvar=objvar, loc=SourceLoc(entries[i].file_index, entries[i].line)))
             ensure_symbol(objvar, 'variable')
             i += 1
             continue
@@ -683,7 +696,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             lhs, sense, rhs = em.groups()[2:5]  # Skip ename, condition
                             sym = ensure_symbol(ename_ident, 'equation')
                             deps = find_idents(lhs) | find_idents(rhs)
-                            sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+                            sym.defs.append(Definition(kind='equation', text=accumulated, loc=SourceLoc(entries[i].file_index, entries[i].line), deps=deps, lhs=lhs.strip()))
                     i = j
                     break
                 j += 1
@@ -703,7 +716,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                 ename_ident = m.group(1)
                 sym = ensure_symbol(ename_ident, 'equation')
                 deps = find_idents(lhs) | find_idents(rhs)
-                sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=lhs.strip()))
+                sym.defs.append(Definition(kind='equation', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line), deps=deps, lhs=lhs.strip()))
             i += 1
             continue
 
@@ -731,7 +744,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                             expr = accumulated[eq_pos+1:].strip().rstrip(';')
                             deps = find_idents(expr)
                             sym = ensure_symbol(atgt, symbols.get(atgt.lower(), SymbolInfo(original=atgt, stype='unknown')).stype or 'unknown')
-                            sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=atgt.strip()))
+                            sym.defs.append(Definition(kind='assignment', text=accumulated, loc=SourceLoc(entries[i].file_index, entries[i].line), deps=deps, lhs=atgt.strip()))
                         i = j
                         break
                     j += 1
@@ -745,7 +758,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             expr = am.group(3)
             deps = find_idents(expr)
             sym = ensure_symbol(tgt, symbols.get(tgt.lower(), SymbolInfo(original=tgt, stype='unknown')).stype or 'unknown')
-            sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(entries[i].file, entries[i].line), deps=deps, lhs=tgt.strip()))
+            sym.defs.append(Definition(kind='assignment', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line), deps=deps, lhs=tgt.strip()))
             i += 1
             continue
 
@@ -757,7 +770,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
 # Tracing utilities
 # ----------------------------
 
-def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visited: Optional[Set[str]] = None, exclude_sets: bool = False) -> List[str]:
+def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, files_list: List[str], depth: int = 0, visited: Optional[Set[str]] = None, exclude_sets: bool = False) -> List[str]:
     """Return textual trace for a symbol: where its values come from (assignments, tables, deps)."""
     name = norm_ident(name).lower()
     if visited is None:
@@ -780,41 +793,41 @@ def trace_symbol(symbols: Dict[str, SymbolInfo], name: str, depth: int = 0, visi
         for d in sym.defs:
             if d.kind == 'table':
                 if d.skipped:
-                    out.append("  "*depth + f"  ├─ table at {d.loc.file}:{d.loc.line} (large table, parsing skipped for performance)")
+                    out.append("  "*depth + f"  ├─ table at {files_list[d.loc.file_index]}:{d.loc.line} (large table, parsing skipped for performance)")
                 else:
-                    out.append("  "*depth + f"  ├─ table at {d.loc.file}:{d.loc.line} with {len(d.values)} numeric entries")
+                    out.append("  "*depth + f"  ├─ table at {files_list[d.loc.file_index]}:{d.loc.line} with {len(d.values)} numeric entries")
             elif d.kind == 'assignment':
-                out.append("  "*depth + f"  ├─ assignment at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                out.append("  "*depth + f"  ├─ assignment at {files_list[d.loc.file_index]}:{d.loc.line}: {d.text.strip()}")
             elif d.kind == 'equation':
-                out.append("  "*depth + f"  ├─ equation at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                out.append("  "*depth + f"  ├─ equation at {files_list[d.loc.file_index]}:{d.loc.line}: {d.text.strip()}")
             elif d.kind == 'gdx_load':
-                out.append("  "*depth + f"  ├─ GDX load at {d.loc.file}:{d.loc.line} from '{d.gdx_file}'")
+                out.append("  "*depth + f"  ├─ GDX load at {files_list[d.loc.file_index]}:{d.loc.line} from '{d.gdx_file}'")
             elif d.kind == 'alias_declaration':
-                out.append("  "*depth + f"  ├─ alias_declaration at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                out.append("  "*depth + f"  ├─ alias_declaration at {files_list[d.loc.file_index]}:{d.loc.line}: {d.text.strip()}")
                 if sym.base_set:
                     base_sym = symbols.get(sym.base_set.lower())
                     if base_sym:
-                        out.extend(trace_symbol(symbols, sym.base_set, depth+1, visited, exclude_sets))
+                        out.extend(trace_symbol(symbols, sym.base_set, files_list, depth+1, visited, exclude_sets))
             else:
-                out.append("  "*depth + f"  ├─ {d.kind} at {d.loc.file}:{d.loc.line}")
+                out.append("  "*depth + f"  ├─ {d.kind} at {files_list[d.loc.file_index]}:{d.loc.line}")
             dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(d.deps)}
             for dep_name, dep_sym in dep_symbols.items():
                 if not dep_sym or (exclude_sets and dep_sym.stype == 'set'):
                     continue
-                out.extend(trace_symbol(symbols, dep_name, depth+1, visited, exclude_sets))
+                out.extend(trace_symbol(symbols, dep_name, files_list, depth+1, visited, exclude_sets))
     elif sym.decls and any(d.kind == 'alias_declaration' for d in sym.decls):
         for d in sym.decls:
             if d.kind == 'alias_declaration':
-                out.append("  "*depth + f"  ├─ alias_declaration at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                out.append("  "*depth + f"  ├─ alias_declaration at {files_list[d.loc.file_index]}:{d.loc.line}: {d.text.strip()}")
                 if sym.base_set:
                     base_sym = symbols.get(sym.base_set.lower())
                     if base_sym:
-                        out.extend(trace_symbol(symbols, sym.base_set, depth+1, visited, exclude_sets))
+                        out.extend(trace_symbol(symbols, sym.base_set, files_list, depth+1, visited, exclude_sets))
                 break  # assuming only one
     elif sym.decls and any(d.kind == 'declaration' for d in sym.decls):
         for d in sym.decls:
             if d.kind == 'declaration':
-                out.append("  "*depth + f"  ├─ declaration at {d.loc.file}:{d.loc.line}: {d.text.strip()}")
+                out.append("  "*depth + f"  ├─ declaration at {files_list[d.loc.file_index]}:{d.loc.line}: {d.text.strip()}")
                 break
     else:
         out.append("  "*depth + f"  ├─ no definitions found (may be loaded via GDX or includes not captured)")
@@ -840,7 +853,7 @@ def extract_objective(symbols: Dict[str, SymbolInfo], solve: Optional[SolveInfo]
     return s, None
 
 
-def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str, exclude_sets: bool = False) -> List[str]:
+def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str, files_list: List[str], exclude_sets: bool = False) -> List[str]:
     eq = symbols.get(eq_name.lower()) if eq_name else None
     if not eq or eq.stype != 'equation':
         return [f"Equation '{eq_name}' not found."]
@@ -848,7 +861,7 @@ def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str, exclude_sets:
     for d in eq.defs:
         if d.kind != 'equation':
             continue
-        out.append(f"Equation {eq.original} defined at {d.loc.file}:{d.loc.line}")
+        out.append(f"Equation {eq.original} defined at {files_list[d.loc.file_index]}:{d.loc.line}")
         out.append(d.text.strip())
         out.append("Dependencies:")
         dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(d.deps)}
@@ -856,7 +869,7 @@ def explain_equation(symbols: Dict[str, SymbolInfo], eq_name: str, exclude_sets:
             if not dep_sym or (exclude_sets and dep_sym.stype == 'set'):
                 continue
             out.append(f"  - {dep_name}")
-            out.extend(trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets))
+            out.extend(trace_symbol(symbols, dep_name, files_list=files_list, depth=1, exclude_sets=exclude_sets))
     return out
 
 # ----------------------------
@@ -867,10 +880,10 @@ def print_symbols_histogram(symbols):
     stype_counts = defaultdict(int)
     for sym in symbols.values():
         stype_counts[sym.stype] += 1
-    expected_stypes = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknown']
+    expected_stypes = ['set', 'parameter', 'scalar', 'table', 'variable', 'equation', 'unknowns']
     all_stypes = expected_stypes + [s for s in stype_counts if s not in expected_stypes]
     for stype in sorted(all_stypes):
-        plural_stype = stype + "s" if stype not in ("solves", "unknown") else stype
+        plural_stype = stype + "s" if stype not in ("solves", "unknowns") else stype
         count = stype_counts.get(stype, 0)
         print(f"{plural_stype}: {count}")
 
@@ -924,22 +937,24 @@ def main():
     if args.subcommand == 'parse':
         # Parse from root
         try:
-            files = load_gms(args.gms_file)
+            merged_lines, files_list = load_gms(args.gms_file)
         except Exception as e:
             print(f"Error loading files: {e}")
             sys.exit(1)
 
-        symbols, models, solves, aliases = parse_code(files)
+        symbols, models, solves, aliases = parse_code(merged_lines)
+
+        parsed_files = set(files_list)
 
         # Save parse pickle
-        pickled_data = (files, symbols, models, solves, aliases)
+        pickled_data = (merged_lines, files_list, symbols, models, solves, aliases)
         with open(PARSE_PICKLE_FILE, 'wb') as f:
             print("\rSaving parse data...                                            ", end='', flush=True)
             pickle.dump(pickled_data, f)
         print(f"\rParsing complete, saved parse tree to {PARSE_PICKLE_FILE}")
 
         # Print summary
-        print(f"files: {len(extract_visited_files(files))}")
+        print(f"files: {len(parsed_files)}")
         print(f"solves: {len(solves)}")
         print_symbols_histogram(symbols)
 
@@ -951,52 +966,63 @@ def main():
         with open(PARSE_PICKLE_FILE, 'rb') as f:
             print("Loading parse data...", end='', flush=True)
             pickled_data = pickle.load(f)
-            if len(pickled_data) != 5:
+            if len(pickled_data) != 6:
                 print(f"\rError: {PARSE_PICKLE_FILE} is in an old format. Please re-run 'parse <gms_file>' to regenerate.")
                 sys.exit(1)
             print(f"\rParse data loaded from {PARSE_PICKLE_FILE}")
-            files, symbols, models, solves, aliases = pickled_data
-            visited_files = extract_visited_files(files)
+            merged_lines, files_list, symbols, models, solves, aliases = pickled_data
+            parsed_files = set(files_list)
 
-        if args.subcommand == 'list':
-            if args.list_command == 'solves':
-                print("Solve statements:")
-                for idx, s in enumerate(solves, start=1):
-                    print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+        if args.subcommand == 'save':
+            with open(args.output_file, 'w') as f:
+                for entry in merged_lines:
+                    f.write(entry.text + '\n')
+            print(f"Merged decommented source code saved to {args.output_file}")
+            sys.exit(0)
+
+        elif args.subcommand == 'list':
+            if args.list_command is None:
+                # Show summary
+                print("Parsed symbols summary:")
+                print(f"files: {len(parsed_files)}")
+                print(f"solves: {len(solves)}")
+                print_symbols_histogram(symbols)
+                sys.exit(0)
             elif args.list_command == 'files':
                 print("Included files:")
-                for f in sorted(visited_files):
+                for f in sorted(parsed_files):
                     print(f)
+                exit(0)
+            elif args.list_command == 'solves':
+                print("Solve statements:")
+                for idx, s in enumerate(solves, start=1):
+                    print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {files_list[s.loc.file_index]}:{s.loc.line}")
+                exit(0)
             else:
-                    if args.list_command is None:
-                        # Show summary
-                        print("Parsed symbols summary:")
-                        print(f"files: {len(visited_files)}")
-                        print_symbols_histogram(symbols)
-                        sys.exit(0)
-            # Handle symbol type lists
-            plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
-            if args.list_command in plural_types:
-                stype = args.list_command[:-1]  # Remove 's' to get singular stype
-                if stype == 'variable':
-                    # Special handling for variables: group by type
-                    vtypes = defaultdict(list)
-                    for sym in symbols.values():
-                        if sym.stype == 'variable':
-                            vtype_str = sym.vtype or "UNKNOWN"
-                            vtypes[vtype_str].append(sym.original)
-                    for vtype in sorted(vtypes):
-                        print(f"{vtype} Variables:")
-                        for name in sorted(vtypes[vtype]):
-                            print(name)
-                else:
-                    names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
-                    if names:
-                        print(f"{stype.title()}s:")
-                        for name in names:
-                            print(name)
+                # Handle symbol type lists
+                plural_types = ['sets', 'parameters', 'scalars', 'tables', 'variables', 'equations', 'unknowns']
+                if args.list_command in plural_types:
+                    stype = args.list_command[:-1]  # Remove 's' to get singular stype
+                    if stype == 'variable':
+                        # Special handling for variables: group by type
+                        vtypes = defaultdict(list)
+                        for sym in symbols.values():
+                            if sym.stype == 'variable':
+                                vtype_str = sym.vtype or "UNKNOWN"
+                                vtypes[vtype_str].append(sym.original)
+                        for vtype in sorted(vtypes):
+                            print(f"{vtype} Variables:")
+                            for name in sorted(vtypes[vtype]):
+                                print(name)
                     else:
-                        print(f"No {stype}s found.")
+                        names = sorted([sym.original for sym in symbols.values() if sym.stype == stype])
+                        if names:
+                            print(f"{stype.title()}s:")
+                            for name in names:
+                                print(name)
+                        else:
+                            print(f"No {stype}s found.")
+                exit(0)
 
         elif args.subcommand == 'trace' or args.subcommand == 'trace_with_sets':
             exclude_sets = (args.subcommand == 'trace')
@@ -1010,17 +1036,17 @@ def main():
                     if solve_num < 1 or solve_num > len(solves):
                         print("Invalid solve number. Available solves:")
                         for idx, s in enumerate(solves, start=1):
-                            print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                            print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {files_list[s.loc.file_index]}:{s.loc.line}")
                         sys.exit(1)
                     target_solve = solves[solve_num - 1]
                     s, obj_def = extract_objective(symbols, target_solve)
                     if not s:
                         print("No solve detected.")
                     else:
-                        print(f"Objective: {s.sense} {s.objvar} (from solve at {s.loc.file}:{s.loc.line})")
+                        print(f"Objective: {s.sense} {s.objvar} (from solve at {files_list[s.loc.file_index]}:{s.loc.line})")
                         if obj_def:
                             kind_str = "equation" if obj_def.kind == 'equation' else 'assignment'
-                            print(f"Objective defining {kind_str} at {obj_def.loc.file}:{obj_def.loc.line}")
+                            print(f"Objective defining {kind_str} at {files_list[obj_def.loc.file_index]}:{obj_def.loc.line}")
                             print(obj_def.text.strip())
                             print("\nTracing dependencies of the objective expression:")
                             dep_symbols = {dep: symbols.get(dep.lower()) for dep in sorted(obj_def.deps)}
@@ -1028,7 +1054,7 @@ def main():
                                 if dep_name == s.objvar or (exclude_sets and dep_sym and dep_sym.stype == 'set'):
                                     continue
                                 print(dep_name)
-                                for ln in trace_symbol(symbols, dep_name, depth=1, exclude_sets=exclude_sets):
+                                for ln in trace_symbol(symbols, dep_name, files_list=files_list, depth=1, exclude_sets=exclude_sets):
                                     print(ln)
                         else:
                             print("No explicit objective-defining equation found. Consider tracing parameters used in constraints that reference the objective variable.")
@@ -1041,14 +1067,15 @@ def main():
                             sys.exit(1)
                     sym = symbols.get(name.lower())
                     if sym and sym.stype == 'equation':
-                        for ln in explain_equation(symbols, name, exclude_sets=exclude_sets):
-                            print(ln)
+                       for ln in explain_equation(symbols, name, files_list, exclude_sets=exclude_sets):
+                          print(ln)
                     else:
-                        for ln in trace_symbol(symbols, name, exclude_sets=exclude_sets):
+                        for ln in trace_symbol(symbols, name, files_list, exclude_sets=exclude_sets):
                             print(ln)
             else:
                 print("Error: No target specified for trace.")
                 sys.exit(1)
+            exit(0)
 
         elif args.subcommand == 'show':
             target = args.target
@@ -1057,10 +1084,10 @@ def main():
                 if solve_num < 1 or solve_num > len(solves):
                     print("Invalid solve number. Available solves:")
                     for idx, s in enumerate(solves, start=1):
-                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {s.loc.file}:{s.loc.line}")
+                        print(f"{idx}. model={s.model} using {s.solver} {s.sense} objvar={s.objvar} at {files_list[s.loc.file_index]}:{s.loc.line}")
                     sys.exit(1)
                 selected_solve = solves[solve_num - 1]
-                print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {selected_solve.loc.file}:{selected_solve.loc.line}")
+                print(f"Solve: model={selected_solve.model} using {selected_solve.solver} {selected_solve.sense}, objvar={selected_solve.objvar} at {files_list[selected_solve.loc.file_index]}:{selected_solve.loc.line}")
             except ValueError:
                 # symbol
                 symbol_name = target
@@ -1080,11 +1107,11 @@ def main():
                         text = d.text
                     if loc:
                         if sym.stype == 'variable':
-                            print(f"Variable {sym.original} ({sym.vtype}) declared at {loc.file}:{loc.line}")
+                            print(f"Variable {sym.original} ({sym.vtype}) declared at {files_list[loc.file_index]}:{loc.line}")
                         elif sym.stype == 'unknown':
-                            print(f"Unknown symbol {sym.original} last referenced at {loc.file}:{loc.line}")
+                            print(f"Unknown symbol {sym.original} last referenced at {files_list[loc.file_index]}:{loc.line}")
                         else:
-                            print(f"{sym.stype.title()} {sym.original} declared at {loc.file}:{loc.line}")
+                            print(f"{sym.stype.title()} {sym.original} declared at {files_list[loc.file_index]}:{loc.line}")
                         if sym.dims:
                             print(f"Dimensions: {', '.join(sym.dims)}")
                         if sym.stype == 'set' and sym.base_set:
@@ -1107,6 +1134,7 @@ def main():
                             print(f"{sym.stype.title()} {sym.original} has no parsed definitions or declarations.")
                 else:
                     print(f"Symbol '{symbol_name}' not found in parsed data.")
+            exit(0)
 
 if __name__ == '__main__':
     main()

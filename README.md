@@ -4,7 +4,7 @@ The `gams_trace.py` script:
 
 *   Recursively loads your GAMS sources and resolves `$include` / `$batinclude`
 *   Parses common declarations: `Sets`, `Parameters/Scalars`, `Tables`, `Variables` (including multi-line declarations where variable lists may be comma-separated across lines, and classifying by type such as FREE, POSITIVE, etc.), `Equations`, `Model`
-*   Detects your `solve ... using ... minimizing|maximizing ...` (any solver)
+*   Detects your `solve ... using ... minimizing|maximizing ...` or `solve ... minimizing|maximizing ... using ...` (any solver)
 *   Builds a **dependency graph** of symbols referenced by assignments/equations
 *   Recognizes and resolves `alias` declarations for set alternative names
 *   Lets you query and **trace** the origin of data (e.g., parameters feeding the objective or a constraint’s RHS)
@@ -228,7 +228,7 @@ solve m using lp minimizing Z;
     *   Assignments: `name(index?) = expression;`
     *   Equations: `eq .. LHS =l|e|g= RHS;`
     *   Model membership: `model m / eq1, eq2 /;`
-    *   Solve: `solve m using ... minimizing|maximizing Z;`
+    *   Solve: `solve m using ... minimizing|maximizing Z;` or `solve m minimizing|maximizing Z using ...;`
     *   GDX loads: `$gdxin`, `$load`, `$loaddc`
 *   It computes and prints **dependency chains**. For example, if `c(i) = base(i) + delta;` and `base(i)` comes from a `Table`, you’ll see:
 ```
