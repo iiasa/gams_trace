@@ -93,7 +93,7 @@ EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*
 VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s+(.+);", re.IGNORECASE)
 MULTI_VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
-ALIAS_RE = re.compile(r"^\s*alias\s*\(\s*([a-zA-Z_]\w*)\s*,\s*(.+?)\s*\)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+ALIAS_RE = re.compile(r"^\s*alias\s+(.+?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
 
 def find_idents_with_aliases(expr: str, aliases: Dict[str, str]) -> Set[str]:
     ids = set()
@@ -316,15 +316,47 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             i += 1
             continue
 
+        # Check for multi-line alias start
+        if re.match(r'^\s*alias\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
+            accumulated = line
+            j = i + 1
+            while j < len(entries):
+                next_line = entries[j].text
+                if not next_line.strip():
+                    j += 1
+                    continue
+                accumulated += '\n' + next_line
+                if next_line.strip().endswith(';'):
+                    # Now parse the full alias statement
+                    alias_match = ALIAS_RE.match(accumulated)
+                    if alias_match:
+                        alias_part = alias_match.group(1)
+                        pairs = re.findall(r'\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', alias_part)
+                        for base, alias in pairs:
+                            base = base.strip()
+                            alias = alias.strip()
+                            base_lower = base.lower()
+                            alias_lower = alias.lower()
+                            sym = ensure_symbol(alias, 'set')
+                            sym.base_set = base_lower
+                            sym.decls.append(Definition(kind='alias_declaration', text=accumulated, loc=SourceLoc(entries[i].file_index, entries[i].line)))
+                    i = j
+                    break
+                j += 1
+            i += 1
+            continue
+
         # Alias parsing
         am = ALIAS_RE.match(line)
         if am:
-            base = am.group(1).strip()
-            aliases_str = am.group(2)
-            alias_list = [a.strip() for a in aliases_str.split(',') if a.strip()]
-            base_lower = base.lower()
-            for a in alias_list:
-                sym = ensure_symbol(a, 'set')
+            alias_part = am.group(1)
+            pairs = re.findall(r'\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', alias_part)
+            for base, alias in pairs:
+                base = base.strip()
+                alias = alias.strip()
+                base_lower = base.lower()
+                alias_lower = alias.lower()
+                sym = ensure_symbol(alias, 'set')
                 sym.base_set = base_lower
                 sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
             i += 1
