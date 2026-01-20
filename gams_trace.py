@@ -93,7 +93,7 @@ EQUATION_RE = re.compile(r"^\s*([A-Za-z_]\w*\s*(?:\([^)]*\))?)\s*(?:\$(.+?))?\s*
 VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s+(.+);", re.IGNORECASE)
 MULTI_VAR_DECL_RE = re.compile(r"^\s*((negative|positive|free|binary|integer|semicontinuous|semicont|semiinteger|semiint|sos1|sos2)(?:\([^)]*\))?\s+)?\s*variables?\s*(.*?);", re.IGNORECASE | re.DOTALL)
 TABLE_HEAD_RE = re.compile(r"^\s*tables?\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*", re.IGNORECASE | re.DOTALL)
-ALIAS_RE = re.compile(r"^\s*alias\s+(.+?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+ALIAS_RE = re.compile(r"^\s*alias\s*(.+?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
 
 def find_idents_with_aliases(expr: str, aliases: Dict[str, str]) -> Set[str]:
     ids = set()
@@ -317,7 +317,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
             continue
 
         # Check for multi-line alias start
-        if re.match(r'^\s*alias\s+', line, re.IGNORECASE) and not line.strip().endswith(';'):
+        if re.match(r'^\s*alias\s*', line, re.IGNORECASE) and not line.strip().endswith(';'):
             accumulated = line
             j = i + 1
             while j < len(entries):
@@ -330,7 +330,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     # Now parse the full alias statement
                     alias_match = ALIAS_RE.match(accumulated)
                     if alias_match:
-                        alias_part = alias_match.group(1)
+                        alias_part = alias_match.group(1).strip().split(';')[0].strip()
                         pairs = re.findall(r'\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', alias_part)
                         for base, alias in pairs:
                             base = base.strip()
@@ -349,7 +349,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         # Alias parsing
         am = ALIAS_RE.match(line)
         if am:
-            alias_part = am.group(1)
+            alias_part = am.group(1).strip().split(';')[0].strip()
             pairs = re.findall(r'\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', alias_part)
             for base, alias in pairs:
                 base = base.strip()
