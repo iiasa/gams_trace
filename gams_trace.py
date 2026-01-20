@@ -330,16 +330,27 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                     # Now parse the full alias statement
                     alias_match = ALIAS_RE.match(accumulated)
                     if alias_match:
-                        alias_part = alias_match.group(1).strip().split(';')[0].strip()
-                        pairs = re.findall(r'\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', alias_part)
-                        for base, alias in pairs:
-                            base = base.strip()
-                            alias = alias.strip()
-                            base_lower = base.lower()
-                            alias_lower = alias.lower()
-                            sym = ensure_symbol(alias, 'set')
-                            sym.base_set = base_lower
-                            sym.decls.append(Definition(kind='alias_declaration', text=accumulated, loc=SourceLoc(entries[i].file_index, entries[i].line)))
+                        alias_part = alias_match.group(1).strip()
+                        alias_part = re.sub(r';\s*$', '', alias_part).strip()
+                        inners = re.findall(r'\(\s*([^)]+)\s*\)', alias_part)
+                        for inner in inners:
+                            alias_names = []
+                            parts = inner.strip().split(',')
+                            for part in parts:
+                                words = part.strip().split()
+                                for a in words:
+                                    m = IDENT_RE.search(a)
+                                    if m:
+                                        name = m.group(1)
+                                        if name not in alias_names:
+                                            alias_names.append(name)
+                            if len(alias_names) >= 2:
+                                base = alias_names[0]
+                                aliases = [a for a in alias_names[1:] if a.lower() != base.lower()]
+                                for alias_name in aliases:
+                                    sym = ensure_symbol(alias_name, 'set')
+                                    sym.base_set = base.lower()
+                                    sym.decls.append(Definition(kind='alias_declaration', text=accumulated, loc=SourceLoc(entries[i].file_index, entries[i].line)))
                     i = j
                     break
                 j += 1
@@ -349,16 +360,27 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
         # Alias parsing
         am = ALIAS_RE.match(line)
         if am:
-            alias_part = am.group(1).strip().split(';')[0].strip()
-            pairs = re.findall(r'\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', alias_part)
-            for base, alias in pairs:
-                base = base.strip()
-                alias = alias.strip()
-                base_lower = base.lower()
-                alias_lower = alias.lower()
-                sym = ensure_symbol(alias, 'set')
-                sym.base_set = base_lower
-                sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
+            alias_part = am.group(1).strip()
+            alias_part = re.sub(r';\s*$', '', alias_part).strip()
+            inners = re.findall(r'\(\s*([^)]+)\s*\)', alias_part)
+            for inner in inners:
+                alias_names = []
+                parts = inner.strip().split(',')
+                for part in parts:
+                    words = part.strip().split()
+                    for a in words:
+                        m = IDENT_RE.search(a)
+                        if m:
+                            name = m.group(1)
+                            if name not in alias_names:
+                                alias_names.append(name)
+                if len(alias_names) >= 2:
+                    base = alias_names[0]
+                    aliases = [a for a in alias_names[1:] if a.lower() != base.lower()]
+                    for alias_name in aliases:
+                        sym = ensure_symbol(alias_name, 'set')
+                        sym.base_set = base.lower()
+                        sym.decls.append(Definition(kind='alias_declaration', text=line, loc=SourceLoc(entries[i].file_index, entries[i].line)))
             i += 1
             continue
 
