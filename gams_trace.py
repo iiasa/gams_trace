@@ -587,7 +587,7 @@ def parse_code(entries: List[LineEntry]) -> Tuple[Dict[str, SymbolInfo], List[Mo
                         first_word = word_match.group(1) if word_match else ''
                         if first_word.lower() in NON_ASSIGNABLE_KEYWORDS:
                             break
-                        if not DECL_LINE_RE.match(entries[j].text):
+                        if stype != 'set' and not DECL_LINE_RE.match(entries[j].text):
                             break
                         # Parse parameter/scalar names from this line
                         stripped_l2 = entries[j].text.strip()
